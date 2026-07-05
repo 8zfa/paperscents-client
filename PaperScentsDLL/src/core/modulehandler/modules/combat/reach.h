@@ -1,0 +1,14 @@
+#pragma once
+#include "../../modulebase.h"
+
+class ReachModule : public ModuleBase
+{
+public:
+    ReachModule();
+    void OnEnable() override;
+    void OnDisable() override;
+    void OnUpdate() override;
+
+private:
+    float m_OriginalReach = 3.0f;
+};

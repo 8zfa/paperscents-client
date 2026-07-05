@@ -1,0 +1,238 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B2C3D4E5-F6A7-8901-BCDE-F12345678901}</ProjectGuid>
+    <RootNamespace>PaperScentsDLL</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>DynamicLibrary</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v145</PlatformToolset>
+    <CharacterSet>MultiByte</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings" />
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\intermediate\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>PaperScentsDLL</TargetName>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)build\intermediate\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <TargetName>PaperScentsDLL</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;_USRDLL;PAPERSCENTSDLL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)ext\imgui;$(SolutionDir)ext\imgui\backends;$(SolutionDir)ext\minhook\include;$(SolutionDir)ext\minhook\src;$(SolutionDir)ext\nlohmann;$(SolutionDir)ext\jni;$(ProjectDir)src;$(ProjectDir)src\core\sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalLibraryDirectories>C:\Program Files\Java\jdk-17\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>jvm.lib;opengl32.lib;gdi32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;_USRDLL;PAPERSCENTSDLL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>$(SolutionDir)ext\imgui;$(SolutionDir)ext\imgui\backends;$(SolutionDir)ext\minhook\include;$(SolutionDir)ext\minhook\src;$(SolutionDir)ext\nlohmann;$(SolutionDir)ext\jni;$(ProjectDir)src;$(ProjectDir)src\core\sdk;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <AdditionalOptions>/FS</AdditionalOptions>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <LinkIncremental>false</LinkIncremental>
+      <AdditionalLibraryDirectories>C:\Program Files\Java\jdk-17\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>jvm.lib;opengl32.lib;gdi32.lib;user32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClCompile Include="src\entry.cpp" />
+    <ClCompile Include="src\core\core.cpp" />
+    <ClCompile Include="src\core\d3dhook\d3dhook.cpp" />
+    <ClCompile Include="src\core\java\java.cpp" />
+    <ClCompile Include="src\core\modulehandler\settings\settings.cpp" />
+    <ClCompile Include="src\core\modulehandler\modulebase.cpp" />
+    <ClCompile Include="src\core\modulehandler\modulehandler.cpp" />
+    <ClCompile Include="src\core\modulehandler\register_modules.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\ka.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\velocity.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\autoclicker.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\reach.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\criticals.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\autoblock.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\aimassist.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\wtap.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\world\scaffold.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\stub_modules.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\nametags.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\movement\sprint.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\movement\speed.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\movement\fly.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\movement\noslow.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\movement\step.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\movement\invmove.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\esp.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\fullbright.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\tracers.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\hitbox.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\player\nofall.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\player\legitscaffold.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\player\fastplace.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\player\antivoid.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\player\norotate.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\misc\antibot.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\misc\timer.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\misc\autotool.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\misc\teams.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\exploit\disabler.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\visual\arraylist.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\visual\clickgui.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\visual\watermark.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\visual\targethud.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\visual\keystrokes.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\visual\coordinates.cpp" />
+    <ClCompile Include="src\core\sdk\sdk.cpp" />
+    <ClCompile Include="src\core\sdk\strayCache.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\client\Minecraft.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\client\entity\EntityPlayerSP.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\entity\Entity.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\entity\EntityLivingBase.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\entity\player\EntityPlayer.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\world\World.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\client\settings\GameSettings.cpp" />
+    <ClCompile Include="src\core\sdk\net\minecraft\util\Vec3.cpp" />
+    <ClCompile Include="src\core\sdk\java\lang\String.cpp" />
+    <ClCompile Include="src\core\sdk\java\util\List.cpp" />
+    <ClCompile Include="src\core\rendering\uirendering.cpp" />
+    <ClCompile Include="src\core\java\javahook.cpp" />
+    <ClCompile Include="src\core\rendering\menu\menu.cpp" />
+    <ClCompile Include="src\core\rendering\neverlose\gui.cpp" />
+    <!-- ImGui -->
+    <ClCompile Include="$(SolutionDir)ext\imgui\imgui.cpp" />
+    <ClCompile Include="$(SolutionDir)ext\imgui\imgui_draw.cpp" />
+    <ClCompile Include="$(SolutionDir)ext\imgui\imgui_tables.cpp" />
+    <ClCompile Include="$(SolutionDir)ext\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="$(SolutionDir)ext\imgui\backends\imgui_impl_opengl2.cpp" />
+    <ClCompile Include="$(SolutionDir)ext\imgui\backends\imgui_impl_win32.cpp" />
+    <!-- MinHook -->
+    <ClCompile Include="$(SolutionDir)ext\minhook\src\hook.c" />
+    <ClCompile Include="$(SolutionDir)ext\minhook\src\buffer.c" />
+    <ClCompile Include="$(SolutionDir)ext\minhook\src\trampoline.c" />
+    <ClCompile Include="$(SolutionDir)ext\minhook\src\hde\hde64.c" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="src\entry.h" />
+    <ClInclude Include="src\core\core.h" />
+    <ClInclude Include="src\core\d3dhook\d3dhook.h" />
+    <ClInclude Include="src\core\java\java.h" />
+    <ClInclude Include="src\core\java\javahook.h" />
+    <ClInclude Include="src\core\utilities\logger.h" />
+    <ClInclude Include="src\core\utilities\time.h" />
+    <ClInclude Include="src\core\modulehandler\settings\settings.h" />
+    <ClInclude Include="src\core\modulehandler\modulebase.h" />
+    <ClInclude Include="src\core\modulehandler\modulehandler.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\ka.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\velocity.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\autoclicker.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\reach.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\criticals.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\autoblock.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\aimassist.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\wtap.h" />
+    <ClInclude Include="src\core\modulehandler\modules\movement\sprint.h" />
+    <ClInclude Include="src\core\modulehandler\modules\movement\speed.h" />
+    <ClInclude Include="src\core\modulehandler\modules\movement\fly.h" />
+    <ClInclude Include="src\core\modulehandler\modules\movement\noslow.h" />
+    <ClInclude Include="src\core\modulehandler\modules\movement\step.h" />
+    <ClInclude Include="src\core\modulehandler\modules\movement\invmove.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\esp.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\fullbright.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\tracers.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\hitbox.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\nametags.h" />
+    <ClInclude Include="src\core\modulehandler\modules\player\nofall.h" />
+    <ClInclude Include="src\core\modulehandler\modules\player\legitscaffold.h" />
+    <ClInclude Include="src\core\modulehandler\modules\player\fastplace.h" />
+    <ClInclude Include="src\core\modulehandler\modules\player\antivoid.h" />
+    <ClInclude Include="src\core\modulehandler\modules\player\norotate.h" />
+    <ClInclude Include="src\core\modulehandler\modules\misc\antibot.h" />
+    <ClInclude Include="src\core\modulehandler\modules\misc\timer.h" />
+    <ClInclude Include="src\core\modulehandler\modules\misc\autotool.h" />
+    <ClInclude Include="src\core\modulehandler\modules\misc\teams.h" />
+    <ClInclude Include="src\core\modulehandler\modules\exploit\disabler.h" />
+    <ClInclude Include="src\core\modulehandler\modules\world\scaffold.h" />
+    <ClInclude Include="src\core\modulehandler\modules\stub_modules.h" />
+    <ClInclude Include="src\core\modulehandler\modules\visual\arraylist.h" />
+    <ClInclude Include="src\core\modulehandler\modules\visual\clickgui.h" />
+    <ClInclude Include="src\core\modulehandler\modules\visual\watermark.h" />
+    <ClInclude Include="src\core\modulehandler\modules\visual\targethud.h" />
+    <ClInclude Include="src\core\modulehandler\modules\visual\keystrokes.h" />
+    <ClInclude Include="src\core\modulehandler\modules\visual\coordinates.h" />
+    <ClInclude Include="src\core\sdk\sdk.h" />
+    <ClInclude Include="src\core\sdk\strayCache.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\client\Minecraft.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\client\entity\EntityPlayerSP.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\entity\Entity.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\entity\EntityLivingBase.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\entity\player\EntityPlayer.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\world\World.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\client\settings\GameSettings.h" />
+    <ClInclude Include="src\core\sdk\net\minecraft\util\Vec3.h" />
+    <ClInclude Include="src\core\sdk\java\lang\String.h" />
+    <ClInclude Include="src\core\sdk\java\util\List.h" />
+    <ClInclude Include="src\core\rendering\uirendering.h" />
+    <ClInclude Include="src\core\rendering\menu\menu.h" />
+    <ClInclude Include="src\core\rendering\neverlose\color.hpp" />
+    <ClInclude Include="src\core\rendering\neverlose\gui.hpp" />
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets" />
+  <Target Name="CleanupExtraFiles" AfterTargets="Build" Condition="'$(Configuration)'=='Release'">
+    <Delete Files="$(OutDir)$(TargetName).pdb" ContinueOnError="true" />
+    <Delete Files="$(OutDir)$(TargetName).lib" ContinueOnError="true" />
+    <Delete Files="$(OutDir)$(TargetName).ilk" ContinueOnError="true" />
+    <Delete Files="$(OutDir)$(TargetName).exp" ContinueOnError="true" />
+    <Delete Files="$(OutDir)$(TargetName).iobj" ContinueOnError="true" />
+    <Delete Files="$(OutDir)$(TargetName).ipdb" ContinueOnError="true" />
+  </Target>
+</Project>
