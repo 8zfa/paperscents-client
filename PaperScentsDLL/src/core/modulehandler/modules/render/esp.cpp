@@ -167,6 +167,7 @@ void ESPModule::OnDisable() { Logger::Log("ESP disabled"); }
 
 void ESPModule::OnUpdate()
 {
+    if (++m_FrameCounter % 3 != 0) return;
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) { Logger::Log("ESP: no env"); return; }
 

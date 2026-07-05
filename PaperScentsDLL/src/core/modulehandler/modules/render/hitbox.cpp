@@ -16,6 +16,7 @@ void HitBoxModule::OnDisable() { Logger::Log("HitBox disabled"); }
 void HitBoxModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter % 3 != 0) return;
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

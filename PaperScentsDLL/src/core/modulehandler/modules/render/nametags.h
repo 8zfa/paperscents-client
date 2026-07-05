@@ -21,5 +21,6 @@ public:
 
 private:
     std::vector<NameTagData> m_Tags;
+    int m_FrameCounter = 0;
     static std::string StripColor(const std::string& input);
 };

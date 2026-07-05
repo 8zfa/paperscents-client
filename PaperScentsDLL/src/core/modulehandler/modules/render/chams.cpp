@@ -75,6 +75,7 @@ void ChamsModule::OnDisable() { Logger::Log("Chams disabled"); }
 void ChamsModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter % 3 != 0) return;
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

@@ -19,6 +19,7 @@ void RodAuraModule::OnDisable() { Logger::Log("RodAura disabled"); }
 void RodAuraModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter % 3 != 0) return;
 
     auto now = std::chrono::steady_clock::now();
     int delayMs = (int)((NumberSetting*)FindSetting("Delay"))->GetValue();

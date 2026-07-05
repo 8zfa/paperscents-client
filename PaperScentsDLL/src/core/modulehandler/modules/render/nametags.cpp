@@ -154,6 +154,7 @@ void NametagsModule::OnDisable() { Logger::Log("Nametags disabled"); }
 
 void NametagsModule::OnUpdate()
 {
+    if (++m_FrameCounter % 3 != 0) return;
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) { Logger::Log("Nametags: no env"); return; }
 

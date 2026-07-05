@@ -23,4 +23,5 @@ public:
 private:
     bool WorldToScreen(JNIEnv* env, double x, double y, double z, float& sx, float& sy);
     std::vector<ItemESPData> m_RenderData;
+    int m_FrameCounter = 0;
 };

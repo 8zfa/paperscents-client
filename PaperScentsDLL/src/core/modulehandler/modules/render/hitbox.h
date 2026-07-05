@@ -8,4 +8,7 @@ public:
     void OnEnable() override;
     void OnDisable() override;
     void OnUpdate() override;
+
+private:
+    int m_FrameCounter = 0;
 };

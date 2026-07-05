@@ -73,6 +73,7 @@ void ItemESPModule::OnDisable() { Logger::Log("ItemESP disabled"); }
 void ItemESPModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter % 3 != 0) return;
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
