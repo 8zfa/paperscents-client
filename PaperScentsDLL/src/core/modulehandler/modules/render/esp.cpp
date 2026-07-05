@@ -23,7 +23,7 @@ static jobject GetMc()
     jclass cls = Core::GetInstance().GetJava()->FindClass("ave", "net/minecraft/client/Minecraft");
     if (!cls) { env->ExceptionClear(); cls = env->FindClass("net/minecraft/client/Minecraft"); }
     if (!cls) return nullptr;
-    jmethodID get = env->GetStaticMethodID(cls, "A", "()Leave;");
+    jmethodID get = env->GetStaticMethodID(cls, "A", "()Lave;");
     if (!get) { env->ExceptionClear(); get = env->GetStaticMethodID(cls, "getMinecraft", "()Lnet/minecraft/client/Minecraft;"); }
     if (!get) { env->DeleteLocalRef(cls); return nullptr; }
     env->ExceptionClear();
@@ -209,10 +209,8 @@ static bool IsFriend(const std::string& name)
 ESPModule::ESPModule()
     : ModuleBase("ESP", "See entities through walls", Category::Render)
 {
-    AddSetting<BooleanSetting>("Enabled", true);
     AddSetting<NumberSetting>("FadeDistance", 3.0f, 0.0f, 10.0f, 0.1f);
     AddSetting<BooleanSetting>("HealthBar", true);
-    AddSetting<BooleanSetting>("ShowFriends", true);
     AddSetting<BooleanSetting>("FilledBox", true);
     AddSetting<ColorSetting>("FilledColor", ImColor(0, 0, 0, 40));
     AddSetting<BooleanSetting>("Outline", true);

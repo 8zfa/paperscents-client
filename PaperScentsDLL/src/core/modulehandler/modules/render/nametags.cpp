@@ -21,7 +21,7 @@ static jobject GetMc()
     jclass cls = Core::GetInstance().GetJava()->FindClass("ave", "net/minecraft/client/Minecraft");
     if (!cls) { env->ExceptionClear(); cls = env->FindClass("net/minecraft/client/Minecraft"); }
     if (!cls) return nullptr;
-    jmethodID get = env->GetStaticMethodID(cls, "A", "()Leave;");
+    jmethodID get = env->GetStaticMethodID(cls, "A", "()Lave;");
     if (!get) { env->ExceptionClear(); get = env->GetStaticMethodID(cls, "getMinecraft", "()Lnet/minecraft/client/Minecraft;"); }
     if (!get) { env->DeleteLocalRef(cls); return nullptr; }
     env->ExceptionClear();

@@ -22,5 +22,4 @@ public:
 private:
     std::vector<NameTagData> m_Tags;
     static std::string StripColor(const std::string& input);
-    float GetRenderPosY();
 };

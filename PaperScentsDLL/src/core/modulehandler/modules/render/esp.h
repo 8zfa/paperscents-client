@@ -24,5 +24,4 @@ public:
 
 private:
     std::vector<ESPData> m_RenderData;
-    bool WorldToScreen(double x, double y, double z, float& sx, float& sy);
 };
