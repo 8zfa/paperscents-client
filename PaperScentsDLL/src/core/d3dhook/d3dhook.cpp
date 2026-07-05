@@ -59,6 +59,8 @@ static LRESULT CALLBACK WndProcHook(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 static void SetupImGui()
 {
     g_MenuGLContext = wglCreateContext(g_GameHDC);
+    if (g_OriginalGLContext)
+        wglShareLists(g_OriginalGLContext, g_MenuGLContext);
     wglMakeCurrent(g_GameHDC, g_MenuGLContext);
 
     glMatrixMode(GL_PROJECTION);
