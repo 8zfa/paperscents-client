@@ -9,9 +9,9 @@ public:
     bool Init();
     void Shutdown();
 
-    JNIEnv* GetEnv() { return m_Env; }
+    JNIEnv* GetEnv();
     JavaVM* GetJVM() { return m_Jvm; }
-    bool IsValid() { return m_Env != nullptr; }
+    bool IsValid() { return m_Jvm != nullptr; }
 
     jclass FindClass(const std::string& name);
     jclass FindClass(const std::string& obfName, const std::string& deobfName);
@@ -24,7 +24,6 @@ private:
     bool ProbeClassLoader(jobject classLoader);
 
     JavaVM* m_Jvm = nullptr;
-    JNIEnv* m_Env = nullptr;
     HMODULE m_JvmModule = nullptr;
 
     jobject m_ClassLoader = nullptr;

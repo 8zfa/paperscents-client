@@ -6,6 +6,19 @@
 
 typedef jint(JNICALL* JNI_GetCreatedJavaVMs_t)(JavaVM**, jsize, jsize*);
 
+JNIEnv* Java::GetEnv()
+{
+    if (!m_Jvm) return nullptr;
+    JNIEnv* env = nullptr;
+    jint result = m_Jvm->GetEnv((void**)&env, JNI_VERSION_1_8);
+    if (result == JNI_EDETACHED)
+    {
+        JavaVMAttachArgs args{ JNI_VERSION_1_8, "PaperScents", nullptr };
+        m_Jvm->AttachCurrentThreadAsDaemon((void**)&env, &args);
+    }
+    return env;
+}
+
 bool Java::Init()
 {
     if (!FindJVM())
@@ -26,16 +39,11 @@ bool Java::Init()
 
 void Java::Shutdown()
 {
-    if (m_ClassLoader && m_Env)
+    JNIEnv* env = GetEnv();
+    if (m_ClassLoader && env)
     {
-        m_Env->DeleteGlobalRef(m_ClassLoader);
+        env->DeleteGlobalRef(m_ClassLoader);
         m_ClassLoader = nullptr;
-    }
-
-    if (m_Env && m_Jvm)
-    {
-        m_Jvm->DetachCurrentThread();
-        m_Env = nullptr;
     }
 
     if (m_JvmModule)
@@ -49,36 +57,39 @@ void Java::Shutdown()
 
 void Java::SetupLunarClassLoader()
 {
-    jclass threadClass = m_Env->FindClass("java/lang/Thread");
-    jclass mapClass = m_Env->FindClass("java/util/Map");
-    jclass setClass = m_Env->FindClass("java/util/Set");
-    jclass classLoaderClass = m_Env->FindClass("java/lang/ClassLoader");
+    JNIEnv* env = GetEnv();
+    if (!env) return;
+
+    jclass threadClass = env->FindClass("java/lang/Thread");
+    jclass mapClass = env->FindClass("java/util/Map");
+    jclass setClass = env->FindClass("java/util/Set");
+    jclass classLoaderClass = env->FindClass("java/lang/ClassLoader");
 
     if (!threadClass || !mapClass || !setClass || !classLoaderClass)
     {
-        m_Env->ExceptionClear();
+        env->ExceptionClear();
         Logger::Log("Failed to find thread/collection classes for classloader setup");
         return;
     }
 
-    jmethodID getAllStackTraces = m_Env->GetStaticMethodID(threadClass, "getAllStackTraces", "()Ljava/util/Map;");
-    jmethodID keySet = m_Env->GetMethodID(mapClass, "keySet", "()Ljava/util/Set;");
-    jmethodID toArray = m_Env->GetMethodID(setClass, "toArray", "()[Ljava/lang/Object;");
-    jmethodID getContextCL = m_Env->GetMethodID(threadClass, "getContextClassLoader", "()Ljava/lang/ClassLoader;");
-    m_FindClassMethod = m_Env->GetMethodID(classLoaderClass, "findClass", "(Ljava/lang/String;)Ljava/lang/Class;");
-    m_LoadClassMethod = m_Env->GetMethodID(classLoaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    jmethodID getAllStackTraces = env->GetStaticMethodID(threadClass, "getAllStackTraces", "()Ljava/util/Map;");
+    jmethodID keySet = env->GetMethodID(mapClass, "keySet", "()Ljava/util/Set;");
+    jmethodID toArray = env->GetMethodID(setClass, "toArray", "()[Ljava/lang/Object;");
+    jmethodID getContextCL = env->GetMethodID(threadClass, "getContextClassLoader", "()Ljava/lang/ClassLoader;");
+    m_FindClassMethod = env->GetMethodID(classLoaderClass, "findClass", "(Ljava/lang/String;)Ljava/lang/Class;");
+    m_LoadClassMethod = env->GetMethodID(classLoaderClass, "loadClass", "(Ljava/lang/String;)Ljava/lang/Class;");
 
     if (!getAllStackTraces || !keySet || !toArray || !getContextCL || !m_FindClassMethod)
     {
-        m_Env->ExceptionClear();
+        env->ExceptionClear();
         Logger::Log("Failed to get method IDs for classloader setup");
-        return;
+        goto cleanup;
     }
 
-    jobject stackTracesMap = m_Env->CallStaticObjectMethod(threadClass, getAllStackTraces);
-    jobject threadsSet = m_Env->CallObjectMethod(stackTracesMap, keySet);
-    jobjectArray threads = (jobjectArray)m_Env->CallObjectMethod(threadsSet, toArray);
-    jint threadCount = m_Env->GetArrayLength(threads);
+    jobject stackTracesMap = env->CallStaticObjectMethod(threadClass, getAllStackTraces);
+    jobject threadsSet = env->CallObjectMethod(stackTracesMap, keySet);
+    jobjectArray threads = (jobjectArray)env->CallObjectMethod(threadsSet, toArray);
+    jint threadCount = env->GetArrayLength(threads);
 
     const char* probeNames[] = {
         "net.minecraft.client.Minecraft",
@@ -88,55 +99,56 @@ void Java::SetupLunarClassLoader()
 
     for (int i = 0; i < threadCount; i++)
     {
-        jobject thread = m_Env->GetObjectArrayElement(threads, i);
-        jobject classLoader = m_Env->CallObjectMethod(thread, getContextCL);
+        jobject thread = env->GetObjectArrayElement(threads, i);
+        jobject classLoader = env->CallObjectMethod(thread, getContextCL);
 
         if (classLoader)
         {
             for (const char* probe : probeNames)
             {
-                jstring jname = m_Env->NewStringUTF(probe);
+                jstring jname = env->NewStringUTF(probe);
                 jclass probeClass = nullptr;
                 if (m_LoadClassMethod)
-                    probeClass = (jclass)m_Env->CallObjectMethod(classLoader, m_LoadClassMethod, jname);
+                    probeClass = (jclass)env->CallObjectMethod(classLoader, m_LoadClassMethod, jname);
                 if (!probeClass)
                 {
-                    m_Env->ExceptionClear();
-                    probeClass = (jclass)m_Env->CallObjectMethod(classLoader, m_FindClassMethod, jname);
+                    env->ExceptionClear();
+                    probeClass = (jclass)env->CallObjectMethod(classLoader, m_FindClassMethod, jname);
                 }
-                m_Env->DeleteLocalRef(jname);
+                env->DeleteLocalRef(jname);
 
                 if (probeClass)
                 {
-                    m_ClassLoader = m_Env->NewGlobalRef(classLoader);
+                    m_ClassLoader = env->NewGlobalRef(classLoader);
                     Logger::Log("Found classloader via thread %d, can load %s", i, probe);
-                    m_Env->DeleteLocalRef(probeClass);
-                    m_Env->DeleteLocalRef(classLoader);
-                    m_Env->DeleteLocalRef(thread);
+                    env->DeleteLocalRef(probeClass);
+                    env->DeleteLocalRef(classLoader);
+                    env->DeleteLocalRef(thread);
+                    env->DeleteLocalRef(threads);
+                    env->DeleteLocalRef(threadsSet);
+                    env->DeleteLocalRef(stackTracesMap);
                     goto cleanup;
                 }
-                m_Env->ExceptionClear();
+                env->ExceptionClear();
             }
         }
 
-        m_Env->DeleteLocalRef(thread);
+        env->DeleteLocalRef(thread);
     }
 
     Logger::Log("Failed to find classloader via thread scanning");
 
 cleanup:
-    m_Env->DeleteLocalRef(threads);
-    m_Env->DeleteLocalRef(threadsSet);
-    m_Env->DeleteLocalRef(stackTracesMap);
-    m_Env->DeleteLocalRef(threadClass);
-    m_Env->DeleteLocalRef(mapClass);
-    m_Env->DeleteLocalRef(setClass);
-    m_Env->DeleteLocalRef(classLoaderClass);
+    env->DeleteLocalRef(threadClass);
+    env->DeleteLocalRef(mapClass);
+    env->DeleteLocalRef(setClass);
+    env->DeleteLocalRef(classLoaderClass);
 }
 
 bool Java::ProbeClassLoader(jobject classLoader)
 {
-    if (!classLoader || !m_LoadClassMethod) return false;
+    JNIEnv* env = GetEnv();
+    if (!classLoader || !m_LoadClassMethod || !env) return false;
 
     const char* probeNames[] = {
         "net.minecraft.client.Minecraft",
@@ -146,81 +158,83 @@ bool Java::ProbeClassLoader(jobject classLoader)
 
     for (const char* probe : probeNames)
     {
-        jstring jname = m_Env->NewStringUTF(probe);
-        jclass probeClass = (jclass)m_Env->CallObjectMethod(classLoader, m_LoadClassMethod, jname);
+        jstring jname = env->NewStringUTF(probe);
+        jclass probeClass = (jclass)env->CallObjectMethod(classLoader, m_LoadClassMethod, jname);
         if (!probeClass)
         {
-            m_Env->ExceptionClear();
+            env->ExceptionClear();
             if (m_FindClassMethod)
-                probeClass = (jclass)m_Env->CallObjectMethod(classLoader, m_FindClassMethod, jname);
+                probeClass = (jclass)env->CallObjectMethod(classLoader, m_FindClassMethod, jname);
         }
-        m_Env->DeleteLocalRef(jname);
+        env->DeleteLocalRef(jname);
 
         if (probeClass)
         {
-            m_Env->DeleteLocalRef(probeClass);
+            env->DeleteLocalRef(probeClass);
             return true;
         }
-        m_Env->ExceptionClear();
+        env->ExceptionClear();
     }
     return false;
 }
 
 void Java::TryFindClassLoader()
 {
-    if (m_ClassLoader) return;
+    JNIEnv* env = GetEnv();
+    if (m_ClassLoader || !env) return;
 
-    jclass threadClass = m_Env->FindClass("java/lang/Thread");
-    if (!threadClass) { m_Env->ExceptionClear(); return; }
+    jclass threadClass = env->FindClass("java/lang/Thread");
+    if (!threadClass) { env->ExceptionClear(); return; }
 
-    jmethodID currentThread = m_Env->GetStaticMethodID(threadClass, "currentThread", "()Ljava/lang/Thread;");
-    jmethodID getContextCL = m_Env->GetMethodID(threadClass, "getContextClassLoader", "()Ljava/lang/ClassLoader;");
+    jmethodID currentThread = env->GetStaticMethodID(threadClass, "currentThread", "()Ljava/lang/Thread;");
+    jmethodID getContextCL = env->GetMethodID(threadClass, "getContextClassLoader", "()Ljava/lang/ClassLoader;");
 
     if (currentThread && getContextCL)
     {
-        jobject thread = m_Env->CallStaticObjectMethod(threadClass, currentThread);
-        jobject cl = m_Env->CallObjectMethod(thread, getContextCL);
+        jobject thread = env->CallStaticObjectMethod(threadClass, currentThread);
+        jobject cl = env->CallObjectMethod(thread, getContextCL);
         if (cl && ProbeClassLoader(cl))
         {
-            m_ClassLoader = m_Env->NewGlobalRef(cl);
+            m_ClassLoader = env->NewGlobalRef(cl);
             Logger::Log("Found classloader via current thread");
-            m_Env->DeleteLocalRef(cl);
-            m_Env->DeleteLocalRef(thread);
-            m_Env->DeleteLocalRef(threadClass);
+            env->DeleteLocalRef(cl);
+            env->DeleteLocalRef(thread);
+            env->DeleteLocalRef(threadClass);
             return;
         }
-        if (cl) m_Env->DeleteLocalRef(cl);
-        m_Env->ExceptionClear();
-        m_Env->DeleteLocalRef(thread);
+        if (cl) env->DeleteLocalRef(cl);
+        env->ExceptionClear();
+        env->DeleteLocalRef(thread);
     }
-    m_Env->DeleteLocalRef(threadClass);
+    env->DeleteLocalRef(threadClass);
 }
 
 jclass Java::FindClass(const std::string& name)
 {
-    if (!m_Env) return nullptr;
-    jclass cls = m_Env->FindClass(name.c_str());
+    JNIEnv* env = GetEnv();
+    if (!env) return nullptr;
+    jclass cls = env->FindClass(name.c_str());
     if (cls) return cls;
-    m_Env->ExceptionClear();
+    env->ExceptionClear();
 
     if (m_ClassLoader)
     {
         std::string dotName = name;
         for (auto& c : dotName) if (c == '/') c = '.';
-        jstring jname = m_Env->NewStringUTF(dotName.c_str());
+        jstring jname = env->NewStringUTF(dotName.c_str());
         if (m_LoadClassMethod)
         {
-            cls = (jclass)m_Env->CallObjectMethod(m_ClassLoader, m_LoadClassMethod, jname);
-            if (cls) { m_Env->DeleteLocalRef(jname); return cls; }
-            m_Env->ExceptionClear();
+            cls = (jclass)env->CallObjectMethod(m_ClassLoader, m_LoadClassMethod, jname);
+            if (cls) { env->DeleteLocalRef(jname); return cls; }
+            env->ExceptionClear();
         }
         if (m_FindClassMethod)
         {
-            cls = (jclass)m_Env->CallObjectMethod(m_ClassLoader, m_FindClassMethod, jname);
-            if (cls) { m_Env->DeleteLocalRef(jname); return cls; }
-            m_Env->ExceptionClear();
+            cls = (jclass)env->CallObjectMethod(m_ClassLoader, m_FindClassMethod, jname);
+            if (cls) { env->DeleteLocalRef(jname); return cls; }
+            env->ExceptionClear();
         }
-        m_Env->DeleteLocalRef(jname);
+        env->DeleteLocalRef(jname);
     }
 
     return nullptr;
@@ -228,13 +242,15 @@ jclass Java::FindClass(const std::string& name)
 
 jclass Java::FindClass(const std::string& obfName, const std::string& deobfName)
 {
-    jclass cls = m_Env->FindClass(obfName.c_str());
+    JNIEnv* env = GetEnv();
+    if (!env) return nullptr;
+    jclass cls = env->FindClass(obfName.c_str());
     if (cls) return cls;
-    m_Env->ExceptionClear();
+    env->ExceptionClear();
 
-    cls = m_Env->FindClass(deobfName.c_str());
+    cls = env->FindClass(deobfName.c_str());
     if (cls) return cls;
-    m_Env->ExceptionClear();
+    env->ExceptionClear();
 
     if (!m_ClassLoader)
         TryFindClassLoader();
@@ -243,23 +259,23 @@ jclass Java::FindClass(const std::string& obfName, const std::string& deobfName)
     {
         std::string deobfDot = deobfName;
         for (auto& c : deobfDot) if (c == '/') c = '.';
-        jstring jname = m_Env->NewStringUTF(deobfDot.c_str());
+        jstring jname = env->NewStringUTF(deobfDot.c_str());
         if (m_LoadClassMethod)
         {
-            cls = (jclass)m_Env->CallObjectMethod(m_ClassLoader, m_LoadClassMethod, jname);
-            if (cls) { m_Env->DeleteLocalRef(jname); return cls; }
-            m_Env->ExceptionClear();
+            cls = (jclass)env->CallObjectMethod(m_ClassLoader, m_LoadClassMethod, jname);
+            if (cls) { env->DeleteLocalRef(jname); return cls; }
+            env->ExceptionClear();
         }
-        m_Env->DeleteLocalRef(jname);
+        env->DeleteLocalRef(jname);
 
-        jstring jobf = m_Env->NewStringUTF(obfName.c_str());
+        jstring jobf = env->NewStringUTF(obfName.c_str());
         if (m_LoadClassMethod)
         {
-            cls = (jclass)m_Env->CallObjectMethod(m_ClassLoader, m_LoadClassMethod, jobf);
-            if (cls) { m_Env->DeleteLocalRef(jobf); return cls; }
-            m_Env->ExceptionClear();
+            cls = (jclass)env->CallObjectMethod(m_ClassLoader, m_LoadClassMethod, jobf);
+            if (cls) { env->DeleteLocalRef(jobf); return cls; }
+            env->ExceptionClear();
         }
-        m_Env->DeleteLocalRef(jobf);
+        env->DeleteLocalRef(jobf);
     }
 
     return nullptr;
@@ -331,14 +347,15 @@ bool Java::AttachAsDaemon()
 
     m_Jvm = vmBuf[0];
 
+    JNIEnv* env = nullptr;
     JavaVMAttachArgs args;
     args.version = JNI_VERSION_1_8;
     args.name = "PaperScents";
     args.group = nullptr;
 
-    result = m_Jvm->AttachCurrentThreadAsDaemon((void**)&m_Env, &args);
+    result = m_Jvm->AttachCurrentThreadAsDaemon((void**)&env, &args);
 
-    if (result != JNI_OK || !m_Env)
+    if (result != JNI_OK || !env)
     {
         Logger::Log("AttachCurrentThreadAsDaemon failed");
         return false;

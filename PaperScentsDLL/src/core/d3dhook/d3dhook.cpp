@@ -137,7 +137,20 @@ static void RenderImGui()
 
     ImGui::EndFrame();
     ImGui::Render();
+
+    glPushAttrib(GL_ALL_ATTRIB_BITS);
+    glMatrixMode(GL_PROJECTION);
+    glPushMatrix();
+    glMatrixMode(GL_MODELVIEW);
+    glPushMatrix();
+
     ImGui_ImplOpenGL2_RenderDrawData(ImGui::GetDrawData());
+
+    glMatrixMode(GL_MODELVIEW);
+    glPopMatrix();
+    glMatrixMode(GL_PROJECTION);
+    glPopMatrix();
+    glPopAttrib();
 }
 
 HWND GetGameWindowHandle()
