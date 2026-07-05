@@ -2,13 +2,6 @@
 #include "../modulebase.h"
 
 // Combat stubs
-class KeepSprintModule : public ModuleBase {
-public:
-    KeepSprintModule();
-    void OnEnable() override;
-    void OnDisable() override;
-};
-
 class BackTrackModule : public ModuleBase {
 public:
     BackTrackModule();
@@ -26,13 +19,6 @@ public:
 class TriggerBotModule : public ModuleBase {
 public:
     TriggerBotModule();
-    void OnEnable() override;
-    void OnDisable() override;
-};
-
-class BowAimModule : public ModuleBase {
-public:
-    BowAimModule();
     void OnEnable() override;
     void OnDisable() override;
 };
@@ -102,30 +88,9 @@ public:
     void OnDisable() override;
 };
 
-class FreeCamModule : public ModuleBase {
-public:
-    FreeCamModule();
-    void OnEnable() override;
-    void OnDisable() override;
-};
-
-class NoHurtCamModule : public ModuleBase {
-public:
-    NoHurtCamModule();
-    void OnEnable() override;
-    void OnDisable() override;
-};
-
 class ItemESPModule : public ModuleBase {
 public:
     ItemESPModule();
-    void OnEnable() override;
-    void OnDisable() override;
-};
-
-class SkeletonESPModule : public ModuleBase {
-public:
-    SkeletonESPModule();
     void OnEnable() override;
     void OnDisable() override;
 };
@@ -148,13 +113,6 @@ public:
 class FastMineModule : public ModuleBase {
 public:
     FastMineModule();
-    void OnEnable() override;
-    void OnDisable() override;
-};
-
-class AutoEatModule : public ModuleBase {
-public:
-    AutoEatModule();
     void OnEnable() override;
     void OnDisable() override;
 };

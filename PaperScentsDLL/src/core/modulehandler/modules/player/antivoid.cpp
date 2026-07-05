@@ -1,5 +1,7 @@
 #include "antivoid.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
+#include "../../../sdk/strayCache.h"
+#include "../../../utilities/jni_helpers.h"
 #include "../../../utilities/logger.h"
 
 AntiVoidModule::AntiVoidModule()
@@ -16,103 +18,35 @@ void AntiVoidModule::OnUpdate()
 {
     if (!IsEnabled()) return;
 
-    JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
+    if (!StrayCache::Minecraft || !StrayCache::MinecraftInstance || !StrayCache::Entity) return;
 
-    jclass mcClass = Core::GetInstance().GetJava()->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass)
-    {
-        env->ExceptionClear();
-        mcClass = env->FindClass("net/minecraft/client/Minecraft");
-    }
-    if (!mcClass) return;
+    jobject mc = StrayCache::MinecraftInstance;
+    jobject player = GetPlayerObject(env, mc);
+    if (!player) return;
 
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc)
-    {
-        env->ExceptionClear();
-        getMc = env->GetStaticMethodID(mcClass, "a", "()Lave;");
-    }
-    if (!getMc)
-    {
-        env->ExceptionClear();
-        getMc = env->GetStaticMethodID(mcClass, "getMinecraft", "()Lave;");
-    }
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
+    jfieldID posYID = env->GetFieldID(StrayCache::Entity, "s", "D");
+    if (!posYID) { env->ExceptionClear(); posYID = env->GetFieldID(StrayCache::Entity, "posY", "D"); }
     env->ExceptionClear();
 
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
-
-    jfieldID playerField = env->GetFieldID(mcClass, "h", "Lbew;");
-    if (!playerField)
-    {
-        env->ExceptionClear();
-        playerField = env->GetFieldID(mcClass, "thePlayer", "Lbew;");
-    }
+    jfieldID motionYID = env->GetFieldID(StrayCache::Entity, "w", "D");
+    if (!motionYID) { env->ExceptionClear(); motionYID = env->GetFieldID(StrayCache::Entity, "motionY", "D"); }
     env->ExceptionClear();
 
-    jobject player = playerField ? env->GetObjectField(mc, playerField) : nullptr;
-    if (!player) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass entityClass = Core::GetInstance().GetJava()->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!entityClass)
-    {
-        env->ExceptionClear();
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
-    }
-
-    jfieldID posYID = env->GetFieldID(entityClass, "s", "D");
-    if (!posYID)
-    {
-        env->ExceptionClear();
-        posYID = env->GetFieldID(entityClass, "posY", "D");
-    }
+    jfieldID onGroundID = env->GetFieldID(StrayCache::Entity, "I", "Z");
+    if (!onGroundID) { env->ExceptionClear(); onGroundID = env->GetFieldID(StrayCache::Entity, "onGround", "Z"); }
     env->ExceptionClear();
 
-    jfieldID motionYID = env->GetFieldID(entityClass, "w", "D");
-    if (!motionYID)
-    {
-        env->ExceptionClear();
-        motionYID = env->GetFieldID(entityClass, "motionY", "D");
-    }
+    jfieldID posXID = env->GetFieldID(StrayCache::Entity, "r", "D");
+    if (!posXID) { env->ExceptionClear(); posXID = env->GetFieldID(StrayCache::Entity, "posX", "D"); }
     env->ExceptionClear();
 
-    jfieldID onGroundID = env->GetFieldID(entityClass, "I", "Z");
-    if (!onGroundID)
-    {
-        env->ExceptionClear();
-        onGroundID = env->GetFieldID(entityClass, "onGround", "Z");
-    }
+    jfieldID posZID = env->GetFieldID(StrayCache::Entity, "t", "D");
+    if (!posZID) { env->ExceptionClear(); posZID = env->GetFieldID(StrayCache::Entity, "posZ", "D"); }
     env->ExceptionClear();
 
-    jfieldID posXID = env->GetFieldID(entityClass, "r", "D");
-    if (!posXID)
-    {
-        env->ExceptionClear();
-        posXID = env->GetFieldID(entityClass, "posX", "D");
-    }
-    env->ExceptionClear();
-
-    jfieldID posZID = env->GetFieldID(entityClass, "t", "D");
-    if (!posZID)
-    {
-        env->ExceptionClear();
-        posZID = env->GetFieldID(entityClass, "posZ", "D");
-    }
-    env->ExceptionClear();
-
-    if (!posYID || !motionYID)
-    {
-        env->DeleteLocalRef(entityClass);
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
-    }
+    if (!posYID || !motionYID) { env->DeleteLocalRef(player); return; }
 
     double posY = env->GetDoubleField(player, posYID);
     double motionY = env->GetDoubleField(player, motionYID);
@@ -138,17 +72,9 @@ void AntiVoidModule::OnUpdate()
     {
         if (mode == 0)
         {
-            jfieldID nethandlerField = env->GetFieldID(mcClass, "q", "Leh;");
-            if (!nethandlerField)
-            {
-                env->ExceptionClear();
-                nethandlerField = env->GetFieldID(mcClass, "v", "Leh;");
-            }
-            if (!nethandlerField)
-            {
-                env->ExceptionClear();
-                nethandlerField = env->GetFieldID(mcClass, "getNetHandler", "Leh;");
-            }
+            jfieldID nethandlerField = env->GetFieldID(StrayCache::Minecraft, "q", "Leh;");
+            if (!nethandlerField) { env->ExceptionClear(); nethandlerField = env->GetFieldID(StrayCache::Minecraft, "v", "Leh;"); }
+            if (!nethandlerField) { env->ExceptionClear(); nethandlerField = env->GetFieldID(StrayCache::Minecraft, "getNetHandler", "Leh;"); }
             env->ExceptionClear();
 
             if (nethandlerField)
@@ -158,29 +84,17 @@ void AntiVoidModule::OnUpdate()
                 {
                     jclass nhClass = env->GetObjectClass(nh);
                     jmethodID sendMethod = env->GetMethodID(nhClass, "a", "(Lhb;)V");
-                    if (!sendMethod)
-                    {
-                        env->ExceptionClear();
-                        sendMethod = env->GetMethodID(nhClass, "addToSendQueue", "(Lnet/minecraft/network/Packet;)V");
-                    }
+                    if (!sendMethod) { env->ExceptionClear(); sendMethod = env->GetMethodID(nhClass, "addToSendQueue", "(Lnet/minecraft/network/Packet;)V"); }
                     env->ExceptionClear();
 
                     if (sendMethod)
                     {
-                        jclass c03Class = Core::GetInstance().GetJava()->FindClass("hg", "net/minecraft/network/play/client/C03PacketPlayer");
-                        if (!c03Class)
-                        {
-                            env->ExceptionClear();
-                            c03Class = env->FindClass("net/minecraft/network/play/client/C03PacketPlayer");
-                        }
+                        jclass c03Class = env->FindClass("hg");
+                        if (!c03Class) { env->ExceptionClear(); c03Class = env->FindClass("net/minecraft/network/play/client/C03PacketPlayer"); }
                         if (c03Class)
                         {
                             jmethodID c03Ctor = env->GetMethodID(c03Class, "<init>", "(DDDZ)V");
-                            if (!c03Ctor)
-                            {
-                                env->ExceptionClear();
-                                c03Ctor = env->GetMethodID(c03Class, "<init>", "()V");
-                            }
+                            if (!c03Ctor) { env->ExceptionClear(); c03Ctor = env->GetMethodID(c03Class, "<init>", "()V"); }
                             env->ExceptionClear();
                             if (c03Ctor)
                             {
@@ -205,8 +119,5 @@ void AntiVoidModule::OnUpdate()
         }
     }
 
-    env->DeleteLocalRef(entityClass);
     env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
 }

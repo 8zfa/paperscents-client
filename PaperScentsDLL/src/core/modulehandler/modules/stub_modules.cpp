@@ -2,10 +2,6 @@
 #include <json.hpp>
 
 // Combat stubs
-KeepSprintModule::KeepSprintModule() : ModuleBase("KeepSprint", "Don't lose sprint on attack", Category::Combat) {}
-void KeepSprintModule::OnEnable() {}
-void KeepSprintModule::OnDisable() {}
-
 BackTrackModule::BackTrackModule() : ModuleBase("BackTrack", "Attack players where they were", Category::Combat) {}
 void BackTrackModule::OnEnable() {}
 void BackTrackModule::OnDisable() {}
@@ -17,10 +13,6 @@ void FakeLagModule::OnDisable() {}
 TriggerBotModule::TriggerBotModule() : ModuleBase("TriggerBot", "Auto attack when crosshair on entity", Category::Combat) {}
 void TriggerBotModule::OnEnable() {}
 void TriggerBotModule::OnDisable() {}
-
-BowAimModule::BowAimModule() : ModuleBase("BowAim", "Auto aim bow shots", Category::Combat) {}
-void BowAimModule::OnEnable() {}
-void BowAimModule::OnDisable() {}
 
 RodAuraModule::RodAuraModule() : ModuleBase("RodAura", "Auto use fishing rod", Category::Combat) {}
 void RodAuraModule::OnEnable() {}
@@ -60,21 +52,9 @@ ChamsModule::ChamsModule() : ModuleBase("Chams", "See entities through walls wit
 void ChamsModule::OnEnable() {}
 void ChamsModule::OnDisable() {}
 
-FreeCamModule::FreeCamModule() : ModuleBase("FreeCam", "Detach camera from body", Category::Render) {}
-void FreeCamModule::OnEnable() {}
-void FreeCamModule::OnDisable() {}
-
-NoHurtCamModule::NoHurtCamModule() : ModuleBase("NoHurtCam", "Disable hurt camera effect", Category::Render) {}
-void NoHurtCamModule::OnEnable() {}
-void NoHurtCamModule::OnDisable() {}
-
 ItemESPModule::ItemESPModule() : ModuleBase("ItemESP", "See items through walls", Category::Render) {}
 void ItemESPModule::OnEnable() {}
 void ItemESPModule::OnDisable() {}
-
-SkeletonESPModule::SkeletonESPModule() : ModuleBase("SkeletonESP", "Draw skeletons on players", Category::Render) {}
-void SkeletonESPModule::OnEnable() {}
-void SkeletonESPModule::OnDisable() {}
 
 ArmorHUDModule::ArmorHUDModule() : ModuleBase("ArmorHUD", "Display player armor on screen", Category::Render) {}
 void ArmorHUDModule::OnEnable() {}
@@ -88,10 +68,6 @@ void DirectionHUDModule::OnDisable() {}
 FastMineModule::FastMineModule() : ModuleBase("FastMine", "Break blocks faster", Category::Player) {}
 void FastMineModule::OnEnable() {}
 void FastMineModule::OnDisable() {}
-
-AutoEatModule::AutoEatModule() : ModuleBase("AutoEat", "Auto eat when hungry", Category::Player) {}
-void AutoEatModule::OnEnable() {}
-void AutoEatModule::OnDisable() {}
 
 AutoRespawnModule::AutoRespawnModule() : ModuleBase("AutoRespawn", "Auto respawn on death", Category::Player) {}
 void AutoRespawnModule::OnEnable() {}

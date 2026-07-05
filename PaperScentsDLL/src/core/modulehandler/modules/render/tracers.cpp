@@ -1,5 +1,7 @@
 #include "tracers.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
+#include "../../../sdk/strayCache.h"
+#include "../../../utilities/jni_helpers.h"
 #include "../../../utilities/logger.h"
 #include <imgui.h>
 #include <cmath>
@@ -20,85 +22,25 @@ void TracersModule::OnRender()
 {
     if (!IsEnabled()) return;
 
-    JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
+    if (!StrayCache::Minecraft || !StrayCache::MinecraftInstance || !StrayCache::World || !StrayCache::Entity || !StrayCache::EntityPlayer) return;
 
-    jclass mcClass = Core::GetInstance().GetJava()->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass)
-    {
-        env->ExceptionClear();
-        mcClass = env->FindClass("net/minecraft/client/Minecraft");
-    }
-    if (!mcClass) return;
+    jobject mc = StrayCache::MinecraftInstance;
+    jobject localPlayer = GetPlayerObject(env, mc);
+    if (!localPlayer) return;
 
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc)
-    {
-        env->ExceptionClear();
-        getMc = env->GetStaticMethodID(mcClass, "a", "()Lave;");
-    }
-    if (!getMc)
-    {
-        env->ExceptionClear();
-        getMc = env->GetStaticMethodID(mcClass, "getMinecraft", "()Lave;");
-    }
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
+    jobject world = GetWorldObject(env, mc);
+    if (!world) { env->DeleteLocalRef(localPlayer); return; }
+
+    jfieldID entitiesField = env->GetFieldID(StrayCache::World, "g", "Ljava/util/List;");
+    if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(StrayCache::World, "loadedEntityList", "Ljava/util/List;"); }
     env->ExceptionClear();
 
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
-
-    jfieldID playerField = env->GetFieldID(mcClass, "h", "Lbew;");
-    if (!playerField)
-    {
-        env->ExceptionClear();
-        playerField = env->GetFieldID(mcClass, "thePlayer", "Lbew;");
-    }
-    env->ExceptionClear();
-
-    jobject localPlayer = playerField ? env->GetObjectField(mc, playerField) : nullptr;
-    if (!localPlayer) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jfieldID worldField = env->GetFieldID(mcClass, "f", "Ladm;");
-    if (!worldField)
-    {
-        env->ExceptionClear();
-        worldField = env->GetFieldID(mcClass, "theWorld", "Ladm;");
-    }
-    env->ExceptionClear();
-
-    jobject world = worldField ? env->GetObjectField(mc, worldField) : nullptr;
-    if (!world) { env->DeleteLocalRef(localPlayer); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass worldClass = env->GetObjectClass(world);
-    jfieldID entitiesField = env->GetFieldID(worldClass, "g", "Ljava/util/List;");
-    if (!entitiesField)
-    {
-        env->ExceptionClear();
-        entitiesField = env->GetFieldID(worldClass, "loadedEntityList", "Ljava/util/List;");
-    }
-    env->ExceptionClear();
-
-    if (!entitiesField)
-    {
-        env->DeleteLocalRef(worldClass);
-        env->DeleteLocalRef(world);
-        env->DeleteLocalRef(localPlayer);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
-    }
+    if (!entitiesField) { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); return; }
 
     jobject listObj = env->GetObjectField(world, entitiesField);
-    if (!listObj)
-    {
-        env->DeleteLocalRef(worldClass);
-        env->DeleteLocalRef(world);
-        env->DeleteLocalRef(localPlayer);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
-    }
+    if (!listObj) { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); return; }
 
     jclass listClass = env->FindClass("java/util/List");
     jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
@@ -107,11 +49,8 @@ void TracersModule::OnRender()
     {
         env->DeleteLocalRef(listClass);
         env->DeleteLocalRef(listObj);
-        env->DeleteLocalRef(worldClass);
         env->DeleteLocalRef(world);
         env->DeleteLocalRef(localPlayer);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
         return;
     }
 
@@ -124,35 +63,18 @@ void TracersModule::OnRender()
     ImVec2 screen = ImGui::GetIO().DisplaySize;
     ImVec2 center(screen.x * 0.5f, screen.y * 0.5f);
 
-    jclass entityClass = Core::GetInstance().GetJava()->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!entityClass)
-    {
-        env->ExceptionClear();
-        entityClass = env->FindClass("net/minecraft/entity/Entity");
-    }
-    jclass playerClass = Core::GetInstance().GetJava()->FindClass("wn", "net/minecraft/entity/player/EntityPlayer");
-    if (!playerClass)
-    {
-        env->ExceptionClear();
-        playerClass = env->FindClass("net/minecraft/entity/player/EntityPlayer");
-    }
-
-    jfieldID posXID = env->GetFieldID(entityClass, "r", "D");
-    if (!posXID) { env->ExceptionClear(); posXID = env->GetFieldID(entityClass, "posX", "D"); }
+    jfieldID posXID = env->GetFieldID(StrayCache::Entity, "r", "D");
+    if (!posXID) { env->ExceptionClear(); posXID = env->GetFieldID(StrayCache::Entity, "posX", "D"); }
     env->ExceptionClear();
-    jfieldID posYID = env->GetFieldID(entityClass, "s", "D");
-    if (!posYID) { env->ExceptionClear(); posYID = env->GetFieldID(entityClass, "posY", "D"); }
+    jfieldID posYID = env->GetFieldID(StrayCache::Entity, "s", "D");
+    if (!posYID) { env->ExceptionClear(); posYID = env->GetFieldID(StrayCache::Entity, "posY", "D"); }
     env->ExceptionClear();
-    jfieldID posZID = env->GetFieldID(entityClass, "t", "D");
-    if (!posZID) { env->ExceptionClear(); posZID = env->GetFieldID(entityClass, "posZ", "D"); }
+    jfieldID posZID = env->GetFieldID(StrayCache::Entity, "t", "D");
+    if (!posZID) { env->ExceptionClear(); posZID = env->GetFieldID(StrayCache::Entity, "posZ", "D"); }
     env->ExceptionClear();
 
-    jclass renderManagerClass = Core::GetInstance().GetJava()->FindClass("cgs", "net/minecraft/client/renderer/entity/RenderManager");
-    if (!renderManagerClass)
-    {
-        env->ExceptionClear();
-        renderManagerClass = env->FindClass("net/minecraft/client/renderer/entity/RenderManager");
-    }
+    jclass renderManagerClass = env->FindClass("cgs");
+    if (!renderManagerClass) { env->ExceptionClear(); renderManagerClass = env->FindClass("net/minecraft/client/renderer/entity/RenderManager"); }
 
     jfieldID rmField = nullptr;
     jobject rm = nullptr;
@@ -160,12 +82,8 @@ void TracersModule::OnRender()
 
     if (renderManagerClass)
     {
-        rmField = env->GetFieldID(mcClass, "ad", "Lcgs;");
-        if (!rmField)
-        {
-            env->ExceptionClear();
-            rmField = env->GetFieldID(mcClass, "renderManager", "Lcgs;");
-        }
+        rmField = env->GetFieldID(StrayCache::Minecraft, "ad", "Lcgs;");
+        if (!rmField) { env->ExceptionClear(); rmField = env->GetFieldID(StrayCache::Minecraft, "renderManager", "Lcgs;"); }
         env->ExceptionClear();
 
         if (rmField)
@@ -193,24 +111,12 @@ void TracersModule::OnRender()
         jobject entity = env->CallObjectMethod(listObj, getMethod, i);
         if (!entity) continue;
 
-        if (env->IsSameObject(entity, localPlayer))
-        {
-            env->DeleteLocalRef(entity);
-            continue;
-        }
+        if (env->IsSameObject(entity, localPlayer)) { env->DeleteLocalRef(entity); continue; }
 
-        bool isPlayer = playerClass && env->IsInstanceOf(entity, playerClass);
+        bool isPlayer = env->IsInstanceOf(entity, StrayCache::EntityPlayer);
 
-        if (isPlayer && !showPlayers)
-        {
-            env->DeleteLocalRef(entity);
-            continue;
-        }
-        if (!isPlayer && !showMobs)
-        {
-            env->DeleteLocalRef(entity);
-            continue;
-        }
+        if (isPlayer && !showPlayers) { env->DeleteLocalRef(entity); continue; }
+        if (!isPlayer && !showMobs) { env->DeleteLocalRef(entity); continue; }
 
         double ex = posXID ? env->GetDoubleField(entity, posXID) : 0.0;
         double ey = posYID ? env->GetDoubleField(entity, posYID) : 0.0;
@@ -237,11 +143,7 @@ void TracersModule::OnRender()
         screenPos.x = (float)(center.x + center.x * ax / (tanFov * aspect));
         screenPos.y = (float)(center.y - center.y * ay / tanFov);
 
-        if (screenPos.x < 0 || screenPos.x > screen.x || screenPos.y < 0 || screenPos.y > screen.y)
-        {
-            env->DeleteLocalRef(entity);
-            continue;
-        }
+        if (screenPos.x < 0 || screenPos.x > screen.x || screenPos.y < 0 || screenPos.y > screen.y) { env->DeleteLocalRef(entity); continue; }
 
         draw->AddLine(center, screenPos, col, 1.0f);
 
@@ -260,13 +162,8 @@ void TracersModule::OnRender()
 
     if (rm) env->DeleteLocalRef(rm);
     if (renderManagerClass) env->DeleteLocalRef(renderManagerClass);
-    if (entityClass) env->DeleteLocalRef(entityClass);
-    if (playerClass) env->DeleteLocalRef(playerClass);
     env->DeleteLocalRef(listClass);
     env->DeleteLocalRef(listObj);
-    env->DeleteLocalRef(worldClass);
     env->DeleteLocalRef(world);
     env->DeleteLocalRef(localPlayer);
-    env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
 }

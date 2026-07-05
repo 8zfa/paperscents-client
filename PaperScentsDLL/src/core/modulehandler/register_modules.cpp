@@ -7,6 +7,8 @@
 #include "modules/combat/autoblock.h"
 #include "modules/combat/aimassist.h"
 #include "modules/combat/wtap.h"
+#include "modules/combat/keepsprint.h"
+#include "modules/combat/bowaim.h"
 #include "modules/misc/antibot.h"
 #include "modules/misc/teams.h"
 #include "modules/misc/timer.h"
@@ -22,11 +24,15 @@
 #include "modules/render/tracers.h"
 #include "modules/render/nametags.h"
 #include "modules/render/hitbox.h"
+#include "modules/render/skeletonesp.h"
+#include "modules/render/freecam.h"
+#include "modules/render/nohurtcam.h"
 #include "modules/player/nofall.h"
 #include "modules/player/legitscaffold.h"
 #include "modules/player/fastplace.h"
 #include "modules/player/antivoid.h"
 #include "modules/player/norotate.h"
+#include "modules/player/autoeat.h"
 #include "modules/world/scaffold.h"
 #include "modules/exploit/disabler.h"
 #include "modules/visual/arraylist.h"
@@ -36,7 +42,6 @@
 #include "modules/visual/keystrokes.h"
 #include "modules/visual/coordinates.h"
 #include "modules/stub_modules.h"
-
 void RegisterModules()
 {
     ModuleHandler& handler = ModuleHandler::GetInstance();

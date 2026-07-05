@@ -1,7 +1,8 @@
 #include "criticals.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
+#include "../../../sdk/strayCache.h"
 #include "../../../utilities/logger.h"
-#include <jni.h>
+#include "../../../utilities/jni_helpers.h"
 
 CriticalsModule::CriticalsModule()
     : ModuleBase("Criticals", "Always land critical hits", Category::Combat)
@@ -17,50 +18,31 @@ void CriticalsModule::OnUpdate()
 {
     if (!IsEnabled()) return;
 
-    Java* java = Core::GetInstance().GetJava();
-    if (!java || !java->IsValid()) return;
-    JNIEnv* env = java->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
 
-    jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass) { env->ExceptionClear(); return; }
+    jobject mc = GetMinecraftObject(env);
+    if (!mc) return;
 
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
+    jobject player = GetPlayerObject(env, mc);
+    if (!player) { env->DeleteLocalRef(mc); return; }
 
-    const char* playerFields[] = { "u", "field_71439_g", "thePlayer" };
-    jfieldID pf = nullptr;
-    for (auto f : playerFields)
-    {
-        pf = env->GetFieldID(mcClass, f, "Lbew;");
-        if (!pf) pf = env->GetFieldID(mcClass, f, "Lnet/minecraft/client/entity/EntityPlayerSP;");
-        if (pf) break;
-    }
-    if (!pf) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-    jobject player = env->GetObjectField(mc, pf);
-    if (!player) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass entityClass = java->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
+    jclass entityClass = StrayCache::Entity;
+    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
 
     jfieldID onGroundField = env->GetFieldID(entityClass, "C", "Z");
+    if (!onGroundField) { env->ExceptionClear(); onGroundField = env->GetFieldID(entityClass, "onGround", "Z"); }
+    env->ExceptionClear();
+
     jfieldID motionYField = env->GetFieldID(entityClass, "w", "D");
+    if (!motionYField) { env->ExceptionClear(); motionYField = env->GetFieldID(entityClass, "motionY", "D"); }
+    env->ExceptionClear();
+
     jfieldID posYField = env->GetFieldID(entityClass, "t", "D");
+    if (!posYField) { env->ExceptionClear(); posYField = env->GetFieldID(entityClass, "posY", "D"); }
+    env->ExceptionClear();
 
-    if (!onGroundField || !motionYField || !posYField)
-    {
-        // Try alternative field names
-        const char* ogAlt[] = { "E", "onGround" };
-        for (auto a : ogAlt) { onGroundField = env->GetFieldID(entityClass, a, "Z"); if (onGroundField) break; }
-        const char* myAlt[] = { "motionY" };
-        for (auto a : myAlt) { motionYField = env->GetFieldID(entityClass, a, "D"); if (motionYField) break; }
-        const char* pyAlt[] = { "posY" };
-        for (auto a : pyAlt) { posYField = env->GetFieldID(entityClass, a, "D"); if (posYField) break; }
-    }
-
-    if (!onGroundField) { env->DeleteLocalRef(entityClass); env->DeleteLocalRef(player); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
+    if (!onGroundField) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
 
     jboolean onGround = env->GetBooleanField(player, onGroundField);
 
@@ -112,8 +94,6 @@ void CriticalsModule::OnUpdate()
         m_AppliedThisTick = false;
     }
 
-    env->DeleteLocalRef(entityClass);
     env->DeleteLocalRef(player);
     env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
 }

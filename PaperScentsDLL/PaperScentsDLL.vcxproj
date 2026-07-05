@@ -104,6 +104,12 @@
     <ClCompile Include="src\core\modulehandler\modules\combat\wtap.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\world\scaffold.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\stub_modules.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\keepsprint.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\combat\bowaim.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\skeletonesp.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\freecam.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\render\nohurtcam.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\player\autoeat.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\render\nametags.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\movement\sprint.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\movement\speed.cpp" />
@@ -179,6 +185,8 @@
     <ClInclude Include="src\core\modulehandler\modules\combat\autoblock.h" />
     <ClInclude Include="src\core\modulehandler\modules\combat\aimassist.h" />
     <ClInclude Include="src\core\modulehandler\modules\combat\wtap.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\keepsprint.h" />
+    <ClInclude Include="src\core\modulehandler\modules\combat\bowaim.h" />
     <ClInclude Include="src\core\modulehandler\modules\movement\sprint.h" />
     <ClInclude Include="src\core\modulehandler\modules\movement\speed.h" />
     <ClInclude Include="src\core\modulehandler\modules\movement\fly.h" />
@@ -190,10 +198,14 @@
     <ClInclude Include="src\core\modulehandler\modules\render\tracers.h" />
     <ClInclude Include="src\core\modulehandler\modules\render\hitbox.h" />
     <ClInclude Include="src\core\modulehandler\modules\render\nametags.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\skeletonesp.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\freecam.h" />
+    <ClInclude Include="src\core\modulehandler\modules\render\nohurtcam.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\nofall.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\legitscaffold.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\fastplace.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\antivoid.h" />
+    <ClInclude Include="src\core\modulehandler\modules\player\autoeat.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\norotate.h" />
     <ClInclude Include="src\core\modulehandler\modules\misc\antibot.h" />
     <ClInclude Include="src\core\modulehandler\modules\misc\timer.h" />

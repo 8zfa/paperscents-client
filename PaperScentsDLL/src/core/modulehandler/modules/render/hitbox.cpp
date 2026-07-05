@@ -1,6 +1,8 @@
 #include "hitbox.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
+#include "../../../sdk/strayCache.h"
 #include "../../../utilities/logger.h"
+#include "../../../utilities/jni_helpers.h"
 
 HitBoxModule::HitBoxModule()
     : ModuleBase("HitBox", "Expand entity hitboxes", Category::Render)
@@ -15,85 +17,29 @@ void HitBoxModule::OnUpdate()
 {
     if (!IsEnabled()) return;
 
-    JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
 
-    jclass mcClass = Core::GetInstance().GetJava()->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass)
-    {
-        env->ExceptionClear();
-        mcClass = env->FindClass("net/minecraft/client/Minecraft");
-    }
-    if (!mcClass) return;
+    jobject mc = GetMinecraftObject(env);
+    if (!mc) return;
 
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc)
-    {
-        env->ExceptionClear();
-        getMc = env->GetStaticMethodID(mcClass, "a", "()Lave;");
-    }
-    if (!getMc)
-    {
-        env->ExceptionClear();
-        getMc = env->GetStaticMethodID(mcClass, "getMinecraft", "()Lave;");
-    }
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
-    env->ExceptionClear();
+    jobject localPlayer = GetPlayerObject(env, mc);
+    if (!localPlayer) { env->DeleteLocalRef(mc); return; }
 
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
+    jobject world = GetWorldObject(env, mc);
+    if (!world) { env->DeleteLocalRef(localPlayer); env->DeleteLocalRef(mc); return; }
 
-    jfieldID playerField = env->GetFieldID(mcClass, "h", "Lbew;");
-    if (!playerField)
-    {
-        env->ExceptionClear();
-        playerField = env->GetFieldID(mcClass, "thePlayer", "Lbew;");
-    }
-    env->ExceptionClear();
+    jclass worldClass = StrayCache::World;
+    if (!worldClass) { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); env->DeleteLocalRef(mc); return; }
 
-    jobject localPlayer = playerField ? env->GetObjectField(mc, playerField) : nullptr;
-    if (!localPlayer) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jfieldID worldField = env->GetFieldID(mcClass, "f", "Ladm;");
-    if (!worldField)
-    {
-        env->ExceptionClear();
-        worldField = env->GetFieldID(mcClass, "theWorld", "Ladm;");
-    }
-    env->ExceptionClear();
-
-    jobject world = worldField ? env->GetObjectField(mc, worldField) : nullptr;
-    if (!world) { env->DeleteLocalRef(localPlayer); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass worldClass = env->GetObjectClass(world);
     jfieldID entitiesField = env->GetFieldID(worldClass, "g", "Ljava/util/List;");
-    if (!entitiesField)
-    {
-        env->ExceptionClear();
-        entitiesField = env->GetFieldID(worldClass, "loadedEntityList", "Ljava/util/List;");
-    }
+    if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(worldClass, "loadedEntityList", "Ljava/util/List;"); }
     env->ExceptionClear();
 
-    if (!entitiesField)
-    {
-        env->DeleteLocalRef(worldClass);
-        env->DeleteLocalRef(world);
-        env->DeleteLocalRef(localPlayer);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
-    }
+    if (!entitiesField) { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); env->DeleteLocalRef(mc); return; }
 
     jobject listObj = env->GetObjectField(world, entitiesField);
-    if (!listObj)
-    {
-        env->DeleteLocalRef(worldClass);
-        env->DeleteLocalRef(world);
-        env->DeleteLocalRef(localPlayer);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
-    }
+    if (!listObj) { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); env->DeleteLocalRef(mc); return; }
 
     jclass listClass = env->FindClass("java/util/List");
     jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
@@ -102,47 +48,31 @@ void HitBoxModule::OnUpdate()
     {
         env->DeleteLocalRef(listClass);
         env->DeleteLocalRef(listObj);
-        env->DeleteLocalRef(worldClass);
         env->DeleteLocalRef(world);
         env->DeleteLocalRef(localPlayer);
         env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
         return;
     }
 
     float size = ((NumberSetting*)FindSetting("Size"))->GetValue();
 
-    jclass entityClass = Core::GetInstance().GetJava()->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!entityClass)
-    {
-        env->ExceptionClear();
-        entityClass = env->FindClass("net/minecraft/entity/Entity");
-    }
+    jclass entityClass = StrayCache::Entity;
     if (!entityClass)
     {
         env->DeleteLocalRef(listClass);
         env->DeleteLocalRef(listObj);
-        env->DeleteLocalRef(worldClass);
         env->DeleteLocalRef(world);
         env->DeleteLocalRef(localPlayer);
         env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
         return;
     }
 
     jfieldID widthID = env->GetFieldID(entityClass, "n", "F");
-    if (!widthID)
-    {
-        env->ExceptionClear();
-        widthID = env->GetFieldID(entityClass, "width", "F");
-    }
+    if (!widthID) { env->ExceptionClear(); widthID = env->GetFieldID(entityClass, "width", "F"); }
     env->ExceptionClear();
+
     jfieldID heightID = env->GetFieldID(entityClass, "o", "F");
-    if (!heightID)
-    {
-        env->ExceptionClear();
-        heightID = env->GetFieldID(entityClass, "height", "F");
-    }
+    if (!heightID) { env->ExceptionClear(); heightID = env->GetFieldID(entityClass, "height", "F"); }
     env->ExceptionClear();
 
     int entSize = env->CallIntMethod(listObj, sizeMethod);
@@ -175,12 +105,9 @@ void HitBoxModule::OnUpdate()
         env->DeleteLocalRef(entity);
     }
 
-    env->DeleteLocalRef(entityClass);
     env->DeleteLocalRef(listClass);
     env->DeleteLocalRef(listObj);
-    env->DeleteLocalRef(worldClass);
     env->DeleteLocalRef(world);
     env->DeleteLocalRef(localPlayer);
     env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
 }
