@@ -38,13 +38,13 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)build\intermediate\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>C:\PaperScents\build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>C:\PaperScents\build\intermediate\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>PaperScentsInjector</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>$(SolutionDir)build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(SolutionDir)build\intermediate\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir>C:\PaperScents\build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>C:\PaperScents\build\intermediate\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <TargetName>PaperScentsInjector</TargetName>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -52,7 +52,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)ext\imgui;$(SolutionDir)ext\imgui\backends;$(SolutionDir)ext\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;..\ext\imgui;..\ext\imgui\backends;..\ext\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
     </ClCompile>
@@ -69,7 +69,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(SolutionDir)ext\imgui;$(SolutionDir)ext\imgui\backends;$(SolutionDir)ext\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>src;..\ext\imgui;..\ext\imgui\backends;..\ext\nlohmann;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
     </ClCompile>
@@ -84,15 +84,27 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
-    <ClCompile Include="$(SolutionDir)ext\imgui\imgui.cpp" />
-    <ClCompile Include="$(SolutionDir)ext\imgui\imgui_draw.cpp" />
-    <ClCompile Include="$(SolutionDir)ext\imgui\imgui_tables.cpp" />
-    <ClCompile Include="$(SolutionDir)ext\imgui\imgui_widgets.cpp" />
-    <ClCompile Include="$(SolutionDir)ext\imgui\backends\imgui_impl_dx9.cpp" />
-    <ClCompile Include="$(SolutionDir)ext\imgui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="src\core\config.cpp" />
+    <ClCompile Include="src\core\core.cpp" />
+    <ClCompile Include="src\core\logger.cpp" />
+    <ClCompile Include="src\core\process.cpp" />
+    <ClCompile Include="src\core\ui.cpp" />
+    <ClCompile Include="src\core\window\window.cpp" />
+    <ClCompile Include="..\ext\imgui\imgui.cpp" />
+    <ClCompile Include="..\ext\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\ext\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\ext\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="..\ext\imgui\backends\imgui_impl_dx9.cpp" />
+    <ClCompile Include="..\ext\imgui\backends\imgui_impl_win32.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\main.h" />
+    <ClInclude Include="src\core\config.h" />
+    <ClInclude Include="src\core\core.h" />
+    <ClInclude Include="src\core\logger.h" />
+    <ClInclude Include="src\core\process.h" />
+    <ClInclude Include="src\core\ui.h" />
+    <ClInclude Include="src\core\window\window.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
