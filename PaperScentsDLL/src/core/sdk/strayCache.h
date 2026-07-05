@@ -10,6 +10,14 @@ public:
 
     void Initialize(JNIEnv* env);
 
+    // Cached global refs for key game classes
+    static jclass Minecraft;
+    static jclass World;
+    static jclass Entity;
+    static jclass EntityLivingBase;
+    static jclass EntityPlayer;
+    static jclass EntityPlayerSP;
+
     jclass GetClass(const std::string& name);
     jmethodID GetMethodID(jclass clazz, const std::string& name, const std::string& sig);
     jfieldID GetFieldID(jclass clazz, const std::string& name, const std::string& sig);

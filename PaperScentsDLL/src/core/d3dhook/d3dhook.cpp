@@ -30,6 +30,7 @@ static WNDPROC g_OriginalWndProc = nullptr;
 
 static void PollKeys()
 {
+    if (Menu::GetInstance().IsOpen()) return;
     auto& modules = ModuleHandler::GetInstance().GetModules();
     static std::unordered_map<int, bool> prevStates;
     for (auto* mod : modules)
