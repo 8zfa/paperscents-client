@@ -27,7 +27,7 @@ void AutoBlockModule::OnUpdate()
     jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
     if (!mcClass) { env->ExceptionClear(); return; }
 
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Leave;");
+    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
     if (!getMc) { env->DeleteLocalRef(mcClass); return; }
     jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
     if (!mc) { env->DeleteLocalRef(mcClass); return; }

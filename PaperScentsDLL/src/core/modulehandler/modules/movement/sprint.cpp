@@ -1,7 +1,7 @@
 #include "sprint.h"
 #include "../../../core.h"
 #include "../../../utilities/logger.h"
-#include <jni.h>
+#include "../../../utilities/jni_helpers.h"
 
 SprintModule::SprintModule()
     : ModuleBase("Sprint", "Automatically sprints", Category::Movement)
@@ -16,177 +16,73 @@ void SprintModule::OnDisable() { Logger::Log("Sprint disabled"); }
 void SprintModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-    Java* java = Core::GetInstance().GetJava();
-    if (!java || !java->IsValid()) return;
-    JNIEnv* env = java->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
+
+    jobject mc = GetMinecraftObject(env);
+    if (!mc) return;
+    jobject player = GetPlayerObject(env, mc);
+    if (!player) { env->DeleteLocalRef(mc); return; }
 
     bool omni = ((BooleanSetting*)FindSetting("OmniSprint"))->GetValue();
     bool water = ((BooleanSetting*)FindSetting("SprintInWater"))->GetValue();
 
-    jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass) return;
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
+    Java* java = Core::GetInstance().GetJava();
+    jclass entityClass = java->FindClass("pk", "net/minecraft/entity/Entity");
+    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
+    jclass livingClass = java->FindClass("pr", "net/minecraft/entity/EntityLivingBase");
+    if (!livingClass) { env->DeleteLocalRef(entityClass); env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
 
-    const char* playerFields[] = { "s", "t", "h", "thePlayer" };
-    jobject player = nullptr;
-    jfieldID pf = nullptr;
-    for (auto f : playerFields)
+    jmethodID isSneaking = env->GetMethodID(entityClass, "n", "()Z");
+    if (!isSneaking) { env->ExceptionClear(); isSneaking = env->GetMethodID(entityClass, "isSneaking", "()Z"); }
+    if (isSneaking)
     {
-        pf = env->GetFieldID(mcClass, f, "Lbew;");
-        if (!pf) pf = env->GetFieldID(mcClass, f, "Lnet/minecraft/client/entity/EntityPlayerSP;");
-        if (pf) { player = env->GetObjectField(mc, pf); if (player) break; }
-    }
-    if (!player) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass entityClass = java->FindClass("vg", "net/minecraft/entity/Entity");
-    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass livingClass = java->FindClass("sa", "net/minecraft/entity/EntityLivingBase");
-    if (!livingClass) { env->DeleteLocalRef(entityClass); env->DeleteLocalRef(player); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    // Check if sneaking
-    jmethodID isSneaking = nullptr;
-    const char* sneakMethods[] = { "n", "am", "an", "isSneaking" };
-    for (auto m : sneakMethods)
-    {
-        isSneaking = env->GetMethodID(entityClass, m, "()Z");
-        if (isSneaking) break;
         env->ExceptionClear();
-    }
-    if (isSneaking && env->CallBooleanMethod(player, isSneaking))
-    {
-        env->DeleteLocalRef(livingClass);
-        env->DeleteLocalRef(entityClass);
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
+        if (env->CallBooleanMethod(player, isSneaking))
+        {
+            env->DeleteLocalRef(livingClass); env->DeleteLocalRef(entityClass);
+            env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return;
+        }
     }
 
-    // Check if using item
-    jmethodID isUsingItem = nullptr;
-    const char* useMethods[] = { "e", "g", "h", "isUsingItem" };
-    for (auto m : useMethods)
+    jmethodID isUsingItem = env->GetMethodID(livingClass, "e", "()Z");
+    if (!isUsingItem) { env->ExceptionClear(); isUsingItem = env->GetMethodID(livingClass, "isUsingItem", "()Z"); }
+    if (isUsingItem)
     {
-        isUsingItem = env->GetMethodID(livingClass, m, "()Z");
-        if (isUsingItem) break;
         env->ExceptionClear();
-    }
-    if (isUsingItem && env->CallBooleanMethod(player, isUsingItem))
-    {
-        env->DeleteLocalRef(livingClass);
-        env->DeleteLocalRef(entityClass);
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mc);
-        env->DeleteLocalRef(mcClass);
-        return;
+        if (env->CallBooleanMethod(player, isUsingItem))
+        {
+            env->DeleteLocalRef(livingClass); env->DeleteLocalRef(entityClass);
+            env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return;
+        }
     }
 
-    // Check if in water
     if (!water)
     {
-        jmethodID isInWater = nullptr;
-        const char* waterMethods[] = { "H", "L", "isInWater", "T", "U" };
-        for (auto m : waterMethods)
+        jmethodID isInWater = env->GetMethodID(entityClass, "H", "()Z");
+        if (!isInWater) { env->ExceptionClear(); isInWater = env->GetMethodID(entityClass, "isInWater", "()Z"); }
+        if (isInWater)
         {
-            isInWater = env->GetMethodID(entityClass, m, "()Z");
-            if (isInWater) break;
             env->ExceptionClear();
-        }
-        if (isInWater && env->CallBooleanMethod(player, isInWater))
-        {
-            env->DeleteLocalRef(livingClass);
-            env->DeleteLocalRef(entityClass);
-            env->DeleteLocalRef(player);
-            env->DeleteLocalRef(mc);
-            env->DeleteLocalRef(mcClass);
-            return;
-        }
-    }
-
-    // Check server-side sprint eligibility (food level > 6)
-    jclass playerClass = java->FindClass("vw", "net/minecraft/client/entity/EntityPlayerSP");
-    if (!playerClass) playerClass = java->FindClass("bew", "net/minecraft/client/entity/EntityPlayerSP");
-    if (playerClass)
-    {
-        jmethodID getFoodStats = nullptr;
-        const char* foodMethods[] = { "ao", "ap", "getFoodStats", "cq", "cr" };
-        for (auto m : foodMethods)
-        {
-            getFoodStats = env->GetMethodID(playerClass, m, "()Lbms;");
-            if (!getFoodStats) getFoodStats = env->GetMethodID(playerClass, m, "()Lnet/minecraft/util/FoodStats;");
-            if (getFoodStats) break;
-            env->ExceptionClear();
-        }
-        if (getFoodStats)
-        {
-            jobject foodStats = env->CallObjectMethod(player, getFoodStats);
-            if (foodStats)
+            if (env->CallBooleanMethod(player, isInWater))
             {
-                jclass foodClass = env->GetObjectClass(foodStats);
-                jmethodID getFoodLevel = nullptr;
-                const char* levelMethods[] = { "a", "b", "getFoodLevel" };
-                for (auto m : levelMethods)
-                {
-                    getFoodLevel = env->GetMethodID(foodClass, m, "()I");
-                    if (getFoodLevel) break;
-                    env->ExceptionClear();
-                }
-                if (getFoodLevel)
-                {
-                    jint foodLevel = env->CallIntMethod(foodStats, getFoodLevel);
-                    if (foodLevel <= 6)
-                    {
-                        env->DeleteLocalRef(foodClass);
-                        env->DeleteLocalRef(foodStats);
-                        env->DeleteLocalRef(playerClass);
-                        env->DeleteLocalRef(livingClass);
-                        env->DeleteLocalRef(entityClass);
-                        env->DeleteLocalRef(player);
-                        env->DeleteLocalRef(mc);
-                        env->DeleteLocalRef(mcClass);
-                        return;
-                    }
-                }
-                env->DeleteLocalRef(foodClass);
-                env->DeleteLocalRef(foodStats);
+                env->DeleteLocalRef(livingClass); env->DeleteLocalRef(entityClass);
+                env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return;
             }
         }
-        env->DeleteLocalRef(playerClass);
     }
 
-    // Check if not sprinting yet
-    jmethodID isSprinting = nullptr;
-    const char* sprintCheckMethods[] = { "f", "g", "isSprinting", "q", "r" };
-    for (auto m : sprintCheckMethods)
+    jmethodID setSprinting = env->GetMethodID(entityClass, "b", "(Z)V");
+    if (!setSprinting) { env->ExceptionClear(); setSprinting = env->GetMethodID(entityClass, "setSprinting", "(Z)V"); }
+    if (setSprinting)
     {
-        isSprinting = env->GetMethodID(entityClass, m, "()Z");
-        if (isSprinting) break;
         env->ExceptionClear();
-    }
-    bool alreadySprinting = isSprinting && env->CallBooleanMethod(player, isSprinting);
-
-    if (!alreadySprinting)
-    {
-        jmethodID setSprinting = nullptr;
-        const char* setSprintMethods[] = { "b", "c", "a", "setSprinting", "d" };
-        for (auto m : setSprintMethods)
-        {
-            setSprinting = env->GetMethodID(entityClass, m, "(Z)V");
-            if (setSprinting) break;
-            env->ExceptionClear();
-        }
-        if (setSprinting)
-            env->CallVoidMethod(player, setSprinting, JNI_TRUE);
+        jmethodID isSprinting = env->GetMethodID(entityClass, "f", "()Z");
+        if (!isSprinting) { env->ExceptionClear(); isSprinting = env->GetMethodID(entityClass, "isSprinting", "()Z"); }
+        if (isSprinting) { env->ExceptionClear(); if (!env->CallBooleanMethod(player, isSprinting)) env->CallVoidMethod(player, setSprinting, JNI_TRUE); }
+        else env->CallVoidMethod(player, setSprinting, JNI_TRUE);
     }
 
-    env->DeleteLocalRef(livingClass);
-    env->DeleteLocalRef(entityClass);
-    env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
+    env->DeleteLocalRef(livingClass); env->DeleteLocalRef(entityClass);
+    env->DeleteLocalRef(player); env->DeleteLocalRef(mc);
 }

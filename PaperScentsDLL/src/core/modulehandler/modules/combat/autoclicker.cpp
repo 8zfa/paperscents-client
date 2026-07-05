@@ -3,6 +3,7 @@
 #include "../../../utilities/logger.h"
 #include "../../../core.h"
 #include "../../../rendering/menu/menu.h"
+#include "../../../utilities/jni_helpers.h"
 #include <Windows.h>
 #include <cstdlib>
 #include <algorithm>
@@ -27,73 +28,54 @@ AutoClickerModule::AutoClickerModule()
 void AutoClickerModule::OnEnable() { Logger::Log("AutoClicker enabled"); }
 void AutoClickerModule::OnDisable() { Logger::Log("AutoClicker disabled"); }
 
+static void SwingItem(JNIEnv* env, jobject player)
+{
+    if (!env || !player) return;
+    jclass playerCls = env->GetObjectClass(player);
+    jmethodID swing = env->GetMethodID(playerCls, "a", "()V");
+    if (!swing) { env->ExceptionClear(); swing = env->GetMethodID(playerCls, "swingItem", "()V"); }
+    if (swing) { env->ExceptionClear(); env->CallVoidMethod(player, swing); }
+    env->DeleteLocalRef(playerCls);
+}
+
 static bool IsLookingAtBlock(JNIEnv* env)
 {
-    Java* java = Core::GetInstance().GetJava();
-    if (!java) return false;
-    jclass mcCls = java->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcCls) return false;
-    jmethodID getMc = env->GetStaticMethodID(mcCls, "A", "()Lave;");
-    if (!getMc) { env->ExceptionClear(); getMc = env->GetStaticMethodID(mcCls, "getMinecraft", "()Lnet/minecraft/client/Minecraft;"); }
-    if (!getMc) { env->DeleteLocalRef(mcCls); return false; }
-    env->ExceptionClear();
-    jobject mc = env->CallStaticObjectMethod(mcCls, getMc);
-    env->DeleteLocalRef(mcCls);
+    jobject mc = GetMinecraftObject(env);
     if (!mc) return false;
-
     jclass mcObjCls = env->GetObjectClass(mc);
+    if (!mcObjCls) { env->DeleteLocalRef(mc); return false; }
+
     const char* omoFields[] = { "e", "field_71476_x", "objectMouseOver" };
     jfieldID omoFid = nullptr;
-    jclass mopCls = java->FindClass("azk", "net/minecraft/util/MovingObjectPosition");
     for (auto f : omoFields)
     {
-        if (mopCls)
-        {
-            char sig[64]; snprintf(sig, sizeof(sig), "L%s;", "azk");
-            omoFid = env->GetFieldID(mcObjCls, f, sig);
-            if (!omoFid) { env->ExceptionClear(); omoFid = env->GetFieldID(mcObjCls, f, "Lnet/minecraft/util/MovingObjectPosition;"); }
-        }
-        else
-        {
-            omoFid = env->GetFieldID(mcObjCls, f, "Ljava/lang/Object;");
-        }
+        omoFid = env->GetFieldID(mcObjCls, f, "Lazk;");
+        if (!omoFid) { env->ExceptionClear(); omoFid = env->GetFieldID(mcObjCls, f, "Lnet/minecraft/util/MovingObjectPosition;"); }
         if (omoFid) break;
-        env->ExceptionClear();
     }
-    env->ExceptionClear();
-    jobject mop = omoFid ? env->GetObjectField(mc, omoFid) : nullptr;
+    if (!omoFid) { env->DeleteLocalRef(mcObjCls); env->DeleteLocalRef(mc); return false; }
+    jobject mop = env->GetObjectField(mc, omoFid);
     env->DeleteLocalRef(mcObjCls);
     env->DeleteLocalRef(mc);
     if (!mop) return false;
 
-    if (!mopCls) mopCls = env->GetObjectClass(mop);
+    jclass mopCls = env->GetObjectClass(mop);
     const char* typeFields[] = { "a", "field_78430_b", "typeOfHit" };
     jfieldID typeFid = nullptr;
-    jclass typeEnumCls = java->FindClass("azl", "net/minecraft/util/MovingObjectPosition$MovingObjectType");
     for (auto f : typeFields)
     {
-        if (typeEnumCls)
-        {
-            char sig[64]; snprintf(sig, sizeof(sig), "L%s;", "azl");
-            typeFid = env->GetFieldID(mopCls, f, sig);
-            if (!typeFid) { env->ExceptionClear(); typeFid = env->GetFieldID(mopCls, f, "Lnet/minecraft/util/MovingObjectPosition$MovingObjectType;"); }
-        }
-        else
-        {
-            typeFid = env->GetFieldID(mopCls, f, "Ljava/lang/Enum;");
-        }
+        typeFid = env->GetFieldID(mopCls, f, "Lazl;");
+        if (!typeFid) { env->ExceptionClear(); typeFid = env->GetFieldID(mopCls, f, "Lnet/minecraft/util/MovingObjectPosition$MovingObjectType;"); }
         if (typeFid) break;
-        env->ExceptionClear();
     }
-    env->ExceptionClear();
-    jobject typeObj = typeFid ? env->GetObjectField(mop, typeFid) : nullptr;
-    if (mopCls != java->FindClass("azk", "net/minecraft/util/MovingObjectPosition")) env->DeleteLocalRef(mopCls);
+    if (!typeFid) { env->DeleteLocalRef(mopCls); env->DeleteLocalRef(mop); return false; }
+    jobject typeObj = env->GetObjectField(mop, typeFid);
+    env->DeleteLocalRef(mopCls);
     env->DeleteLocalRef(mop);
     if (!typeObj) return false;
 
     jclass enumCls = env->GetObjectClass(typeObj);
     jmethodID ordinal = env->GetMethodID(enumCls, "ordinal", "()I");
-    env->ExceptionClear();
     jint typeOrdinal = ordinal ? env->CallIntMethod(typeObj, ordinal) : -1;
     env->DeleteLocalRef(enumCls);
     env->DeleteLocalRef(typeObj);
@@ -101,17 +83,26 @@ static bool IsLookingAtBlock(JNIEnv* env)
     return typeOrdinal == 1;
 }
 
-void AutoClickerModule::Click(int btn)
+static void JniClickLeft(JNIEnv* env, jobject mc)
 {
-    HWND hwnd = GetGameWindowHandle();
-    if (!hwnd) return;
-    POINT pt;
-    GetCursorPos(&pt);
-    WPARAM wp = btn == 0 ? MK_LBUTTON : MK_RBUTTON;
-    UINT downMsg = btn == 0 ? WM_LBUTTONDOWN : WM_RBUTTONDOWN;
-    UINT upMsg = btn == 0 ? WM_LBUTTONUP : WM_RBUTTONUP;
-    SendMessage(hwnd, downMsg, wp, MAKELPARAM(pt.x, pt.y));
-    SendMessage(hwnd, upMsg, 0, MAKELPARAM(pt.x, pt.y));
+    if (!env || !mc) return;
+    jclass mcCls = env->GetObjectClass(mc);
+    if (!mcCls) return;
+    jmethodID clickMouse = env->GetMethodID(mcCls, "c", "()V");
+    if (!clickMouse) { env->ExceptionClear(); clickMouse = env->GetMethodID(mcCls, "clickMouse", "()V"); }
+    if (clickMouse) { env->ExceptionClear(); env->CallVoidMethod(mc, clickMouse); }
+    env->DeleteLocalRef(mcCls);
+}
+
+static void JniClickRight(JNIEnv* env, jobject mc)
+{
+    if (!env || !mc) return;
+    jclass mcCls = env->GetObjectClass(mc);
+    if (!mcCls) return;
+    jmethodID rightClick = env->GetMethodID(mcCls, "d", "()V");
+    if (!rightClick) { env->ExceptionClear(); rightClick = env->GetMethodID(mcCls, "rightClickMouse", "()V"); }
+    if (rightClick) { env->ExceptionClear(); env->CallVoidMethod(mc, rightClick); }
+    env->DeleteLocalRef(mcCls);
 }
 
 void AutoClickerModule::OnUpdate()
@@ -120,6 +111,8 @@ void AutoClickerModule::OnUpdate()
     if (Menu::GetInstance().IsOpen()) return;
 
     auto now = std::chrono::steady_clock::now();
+    JNIEnv* env = Java::GetThreadEnv();
+    if (!env) return;
 
     auto lc = (BooleanSetting*)FindSetting("LeftClick");
     auto rc = (BooleanSetting*)FindSetting("RightClick");
@@ -135,14 +128,21 @@ void AutoClickerModule::OnUpdate()
     {
         if (breakBlocks && breakBlocks->GetValue())
         {
-            JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
-            if (!env || !IsLookingAtBlock(env)) { m_LastLClick = now; return; }
+            if (!IsLookingAtBlock(env)) { m_LastLClick = now; return; }
         }
         int cps = randomize && randomize->GetValue() ? (::rand() % (lMax - lMin + 1) + lMin) : (lMin + lMax) / 2;
         int ms = 1000 / std::max(1, cps);
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastLClick).count() >= ms)
         {
-            Click(0);
+            // Try JNI click first, fall back to Win32 messages
+            jobject mc = GetMinecraftObject(env);
+            if (mc)
+            {
+                jobject player = GetPlayerObject(env, mc);
+                JniClickLeft(env, mc);
+                if (player) { SwingItem(env, player); env->DeleteLocalRef(player); }
+                env->DeleteLocalRef(mc);
+            }
             m_LastLClick = now;
         }
     }
@@ -153,7 +153,14 @@ void AutoClickerModule::OnUpdate()
         int ms = 1000 / std::max(1, cps);
         if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastRClick).count() >= ms)
         {
-            Click(1);
+            jobject mc = GetMinecraftObject(env);
+            if (mc)
+            {
+                jobject player = GetPlayerObject(env, mc);
+                JniClickRight(env, mc);
+                if (player) { SwingItem(env, player); env->DeleteLocalRef(player); }
+                env->DeleteLocalRef(mc);
+            }
             m_LastRClick = now;
         }
     }

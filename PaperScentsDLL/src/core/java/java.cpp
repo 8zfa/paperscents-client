@@ -1,10 +1,17 @@
 #include "java.h"
+#include "../core.h"
 #include "../utilities/logger.h"
 #include <vector>
 #include <psapi.h>
 #pragma comment(lib, "psapi")
 
 typedef jint(JNICALL* JNI_GetCreatedJavaVMs_t)(JavaVM**, jsize, jsize*);
+
+JNIEnv* Java::GetThreadEnv()
+{
+    auto* java = Core::GetInstance().GetJava();
+    return (java && java->IsValid()) ? java->GetEnv() : nullptr;
+}
 
 JNIEnv* Java::GetEnv()
 {

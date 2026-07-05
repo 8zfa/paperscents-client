@@ -10,6 +10,7 @@ public:
     void Shutdown();
 
     JNIEnv* GetEnv();
+    static JNIEnv* GetThreadEnv();
     JavaVM* GetJVM() { return m_Jvm; }
     bool IsValid() { return m_Jvm != nullptr; }
 

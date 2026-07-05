@@ -3,6 +3,7 @@
 #include "../utilities/logger.h"
 
 jclass StrayCache::Minecraft = nullptr;
+jobject StrayCache::MinecraftInstance = nullptr;
 jclass StrayCache::World = nullptr;
 jclass StrayCache::Entity = nullptr;
 jclass StrayCache::EntityLivingBase = nullptr;
@@ -31,6 +32,17 @@ void StrayCache::Initialize(JNIEnv* env)
     };
 
     cache("ave", "net/minecraft/client/Minecraft", "Minecraft", Minecraft);
+    if (Minecraft)
+    {
+        jmethodID getMc = env->GetStaticMethodID(Minecraft, "A", "()Lave;");
+        if (!getMc) { env->ExceptionClear(); getMc = env->GetStaticMethodID(Minecraft, "getMinecraft", "()Lnet/minecraft/client/Minecraft;"); }
+        if (getMc)
+        {
+            env->ExceptionClear();
+            jobject mc = env->CallStaticObjectMethod(Minecraft, getMc);
+            if (mc) { MinecraftInstance = env->NewGlobalRef(mc); env->DeleteLocalRef(mc); }
+        }
+    }
     cache("adm", "net/minecraft/world/World", "World", World);
     cache("pk", "net/minecraft/entity/Entity", "Entity", Entity);
     cache("pr", "net/minecraft/entity/EntityLivingBase", "EntityLivingBase", EntityLivingBase);

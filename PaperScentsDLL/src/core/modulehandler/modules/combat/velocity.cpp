@@ -1,32 +1,9 @@
 #include "velocity.h"
-#include "../../../core.h"
 #include "../../../utilities/logger.h"
+#include "../../../core.h"
+#include "../../../utilities/jni_helpers.h"
 #include <jni.h>
 #include <cmath>
-#include <Windows.h>
-
-static JNIEnv* GetEnv()
-{
-    auto* java = Core::GetInstance().GetJava();
-    if (!java || !java->IsValid()) return nullptr;
-    return java->GetEnv();
-}
-
-static jobject GetMc()
-{
-    JNIEnv* env = GetEnv();
-    if (!env) return nullptr;
-    jclass cls = Core::GetInstance().GetJava()->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!cls) { env->ExceptionClear(); cls = env->FindClass("net/minecraft/client/Minecraft"); }
-    if (!cls) return nullptr;
-    jmethodID get = env->GetStaticMethodID(cls, "A", "()Leave;");
-    if (!get) { env->ExceptionClear(); get = env->GetStaticMethodID(cls, "getMinecraft", "()Lnet/minecraft/client/Minecraft;"); }
-    if (!get) { env->DeleteLocalRef(cls); return nullptr; }
-    env->ExceptionClear();
-    jobject mc = env->CallStaticObjectMethod(cls, get);
-    env->DeleteLocalRef(cls);
-    return mc;
-}
 
 VelocityModule::VelocityModule()
     : ModuleBase("Velocity", "Modify knockback", Category::Combat)
@@ -46,32 +23,23 @@ void VelocityModule::OnUpdate()
 {
     if (!IsEnabled()) return;
 
-    JNIEnv* env = GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
 
-    jobject mc = GetMc();
+    jobject mc = GetMinecraftObject(env);
     if (!mc) return;
+    jobject player = GetPlayerObject(env, mc);
+    if (!player) { env->DeleteLocalRef(mc); return; }
 
-    jclass mcCls = env->GetObjectClass(mc);
-    if (!mcCls) { env->DeleteLocalRef(mc); return; }
+    Java* java = Core::GetInstance().GetJava();
+    jclass eCls = java->FindClass("pk", "net/minecraft/entity/Entity");
+    if (!eCls) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
 
-    // Get player
-    jfieldID pfid = env->GetFieldID(mcCls, "u", "Lbew;");
-    if (!pfid) { env->ExceptionClear(); pfid = env->GetFieldID(mcCls, "thePlayer", "Lnet/minecraft/client/entity/EntityPlayerSP;"); }
-    jobject player = pfid ? env->GetObjectField(mc, pfid) : nullptr;
-    if (!player) { env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
-
-    // Get hurt resistant time
-    jclass eCls = Core::GetInstance().GetJava()->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!eCls) { env->ExceptionClear(); eCls = env->FindClass("net/minecraft/entity/Entity"); }
-    if (!eCls) { env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
     jfieldID hrtFid = env->GetFieldID(eCls, "W", "I");
     if (!hrtFid) { env->ExceptionClear(); hrtFid = env->GetFieldID(eCls, "hurtResistantTime", "I"); }
     env->ExceptionClear();
-    int hrt = 0;
-    if (hrtFid) hrt = env->GetIntField(player, hrtFid);
+    int hrt = hrtFid ? env->GetIntField(player, hrtFid) : 0;
 
-    // Get motion
     jfieldID mxFid = env->GetFieldID(eCls, "v", "D");
     if (!mxFid) { env->ExceptionClear(); mxFid = env->GetFieldID(eCls, "motionX", "D"); }
     jfieldID myFid = env->GetFieldID(eCls, "w", "D");
@@ -85,19 +53,17 @@ void VelocityModule::OnUpdate()
 
     int mode = ((EnumSetting*)FindSetting("Mode"))->GetValue();
 
-    if (mode == 0) // Reduce mode
+    if (mode == 0)
     {
         float hPct = ((NumberSetting*)FindSetting("Horizontal"))->GetValue() / 100.0f;
         float vPct = ((NumberSetting*)FindSetting("Vertical"))->GetValue() / 100.0f;
         bool onlyAir = ((BooleanSetting*)FindSetting("OnlyInAir"))->GetValue();
 
-        if (hPct >= 1.0f && vPct >= 1.0f) { env->DeleteLocalRef(eCls); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
+        if (hPct >= 1.0f && vPct >= 1.0f) { env->DeleteLocalRef(eCls); env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
 
-        bool onGround = false;
-        if (ogFid) onGround = env->GetBooleanField(player, ogFid) == JNI_TRUE;
-        if (onlyAir && onGround) { env->DeleteLocalRef(eCls); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
-
-        if (!mxFid || !myFid || !mzFid) { env->DeleteLocalRef(eCls); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
+        bool onGround = ogFid ? (env->GetBooleanField(player, ogFid) == JNI_TRUE) : false;
+        if (onlyAir && onGround) { env->DeleteLocalRef(eCls); env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
+        if (!mxFid || !myFid || !mzFid) { env->DeleteLocalRef(eCls); env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
 
         double mX = env->GetDoubleField(player, mxFid);
         double mY = env->GetDoubleField(player, myFid);
@@ -111,38 +77,25 @@ void VelocityModule::OnUpdate()
             if (vPct < 1.0f) env->SetDoubleField(player, myFid, mY * vPct);
         }
     }
-    else if (mode == 1) // Jump Reset mode
+    else if (mode == 1)
     {
         float chance = ((NumberSetting*)FindSetting("JumpChance"))->GetValue();
-        bool onGround = false;
-        if (ogFid) onGround = env->GetBooleanField(player, ogFid) == JNI_TRUE;
-
+        bool onGround = ogFid ? (env->GetBooleanField(player, ogFid) == JNI_TRUE) : false;
         auto now = std::chrono::steady_clock::now();
         if (m_JumpCooldown > 0) m_JumpCooldown--;
 
-        // Detect knockback: hurtResistantTime == 10 (just hit) and not on ground
         if (hrt == 10 && !onGround && m_JumpCooldown == 0)
         {
             if ((rand() % 100) < chance)
             {
-                // Jump to reset velocity
                 jclass playerCls = env->GetObjectClass(player);
                 jmethodID jumpMid = env->GetMethodID(playerCls, "bI", "()V");
                 if (!jumpMid) { env->ExceptionClear(); jumpMid = env->GetMethodID(playerCls, "jump", "()V"); }
-                env->ExceptionClear();
-                if (jumpMid)
-                {
-                    env->CallVoidMethod(player, jumpMid);
-                    m_LastJump = now;
-                    m_JumpCooldown = 5; // prevent re-triggering
-                }
+                if (jumpMid) { env->CallVoidMethod(player, jumpMid); m_JumpCooldown = 5; }
                 env->DeleteLocalRef(playerCls);
             }
         }
     }
 
-    env->DeleteLocalRef(eCls);
-    env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mcCls);
-    env->DeleteLocalRef(mc);
+    env->DeleteLocalRef(eCls); env->DeleteLocalRef(player); env->DeleteLocalRef(mc);
 }

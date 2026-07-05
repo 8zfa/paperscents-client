@@ -12,5 +12,4 @@ public:
 
 private:
     std::chrono::steady_clock::time_point m_LastLClick, m_LastRClick;
-    void Click(int btn);
 };

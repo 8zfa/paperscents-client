@@ -1,8 +1,7 @@
 #include "esp.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
 #include "../../../utilities/logger.h"
 #include "../../../utilities/jni_helpers.h"
-#include "../../../sdk/strayCache.h"
 #include <imgui.h>
 #include <cmath>
 #include <cfloat>
@@ -48,10 +47,8 @@ static Vec4 Mul(const Mat4& m, const Vec4& v)
 
 static bool WorldToScreen(JNIEnv* env, double x, double y, double z, float& sx, float& sy)
 {
-    Java* java = Core::GetInstance().GetJava();
-    if (!java) return false;
-
-    jclass ari = java->FindClass("avq", "net/minecraft/client/renderer/ActiveRenderInfo");
+    jclass ari = env->FindClass("avq");
+    if (!ari) { env->ExceptionClear(); ari = env->FindClass("net/minecraft/client/renderer/ActiveRenderInfo"); }
     if (!ari) return false;
 
     jfieldID pf = env->GetStaticFieldID(ari, "h", "Ljava/nio/FloatBuffer;");
@@ -170,7 +167,7 @@ void ESPModule::OnDisable() { Logger::Log("ESP disabled"); }
 
 void ESPModule::OnUpdate()
 {
-    JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) { Logger::Log("ESP: no env"); return; }
 
     jobject mc = GetMinecraftObject(env);

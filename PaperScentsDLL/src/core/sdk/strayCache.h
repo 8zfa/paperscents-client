@@ -12,6 +12,7 @@ public:
 
     // Cached global refs for key game classes
     static jclass Minecraft;
+    static jobject MinecraftInstance;
     static jclass World;
     static jclass Entity;
     static jclass EntityLivingBase;
