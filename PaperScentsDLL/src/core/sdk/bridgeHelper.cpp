@@ -238,8 +238,32 @@ bool BridgeHelper::Initialize(JNIEnv* env)
     Java* java = Core::GetInstance().GetJava();
     if (!java) { Logger::Log("BH: Java not available"); return false; }
 
-    // Step 1: Discover MinecraftBridge
+    // Step 0: Try LunarClient.getMinecraftBridge() directly (most reliable)
     jclass mcBridgeLocal = nullptr;
+    {
+        jclass lunarClient = java->FindClass("com.moonsworth.lunar.LunarClient", "com.moonsworth.lunar.LunarClient");
+        if (lunarClient)
+        {
+            jmethodID getBridge = env->GetStaticMethodID(lunarClient, "getMinecraftBridge",
+                "()Lcom/moonsworth/lunar/bridge/client/MinecraftBridge;");
+            if (!getBridge) { env->ExceptionClear(); }
+            if (getBridge)
+            {
+                jobject bridgeObj = env->CallStaticObjectMethod(lunarClient, getBridge);
+                if (bridgeObj)
+                {
+                    mcBridgeLocal = (jclass)env->NewGlobalRef(env->GetObjectClass(bridgeObj));
+                    env->DeleteLocalRef(bridgeObj);
+                    Logger::Log("BH: Got MinecraftBridge via LunarClient.getMinecraftBridge()");
+                }
+            }
+            env->DeleteLocalRef(lunarClient);
+        }
+        else { env->ExceptionClear(); }
+    }
+
+    // Step 1: Fall back to pre-cached bridge from Java discovery
+    if (!mcBridgeLocal)
     {
         jclass known = java->GetBridgeMinecraft();
         if (known) {

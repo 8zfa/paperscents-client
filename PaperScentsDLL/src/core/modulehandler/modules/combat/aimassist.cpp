@@ -50,11 +50,11 @@ void AimAssistModule::OnUpdate()
     }
 
     JNIEnv* env = Java::GetThreadEnv();
-    if (!env) return;
-    if (!BridgeHelper::Initialize(env)) return;
+    if (!env) { Logger::Log("[AimAssist] No JNI env"); return; }
+    if (!BridgeHelper::Initialize(env)) { Logger::Log("[AimAssist] BridgeHelper init failed"); return; }
 
     jobject player = BridgeHelper::GetPlayer(env);
-    if (!player) return;
+    if (!player) { Logger::Log("[AimAssist] No player"); return; }
 
     jobject world = BridgeHelper::GetWorldFromEntity(env, player);
     if (!world) { env->DeleteLocalRef(player); return; }
