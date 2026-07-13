@@ -1,5 +1,6 @@
 #include "aimassist.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
+#include "../../../sdk/bridgeHelper.h"
 #include "../../../utilities/logger.h"
 #include <imgui.h>
 #include <cmath>
@@ -7,112 +8,8 @@
 #include <cstdlib>
 #include <ctime>
 
-static JNIEnv* GetEnv()
-{
-    auto* java = Core::GetInstance().GetJava();
-    if (!java || !java->IsValid()) return nullptr;
-    return java->GetEnv();
-}
-
-static jobject GetMc()
-{
-    JNIEnv* env = GetEnv();
-    if (!env) return nullptr;
-    jclass cls = Core::GetInstance().GetJava()->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!cls) { env->ExceptionClear(); cls = env->FindClass("net/minecraft/client/Minecraft"); }
-    if (!cls) return nullptr;
-    jmethodID get = env->GetStaticMethodID(cls, "A", "()Lave;");
-    if (!get) { env->ExceptionClear(); get = env->GetStaticMethodID(cls, "getMinecraft", "()Lnet/minecraft/client/Minecraft;"); }
-    if (!get) { env->DeleteLocalRef(cls); return nullptr; }
-    env->ExceptionClear();
-    jobject mc = env->CallStaticObjectMethod(cls, get);
-    env->DeleteLocalRef(cls);
-    return mc;
-}
-
-static double GetDouble(JNIEnv* env, jobject obj, const char* obf, const char* deobf)
-{
-    jclass cls = env->GetObjectClass(obj);
-    if (!cls) return 0.0;
-    jfieldID fid = env->GetFieldID(cls, obf, "D");
-    if (!fid) { env->ExceptionClear(); fid = env->GetFieldID(cls, deobf, "D"); }
-    double v = 0.0;
-    if (fid) v = env->GetDoubleField(obj, fid);
-    env->DeleteLocalRef(cls);
-    return v;
-}
-
-static float GetFloat(JNIEnv* env, jobject obj, const char* obf, const char* deobf)
-{
-    jclass cls = env->GetObjectClass(obj);
-    if (!cls) return 0.0f;
-    jfieldID fid = env->GetFieldID(cls, obf, "F");
-    if (!fid) { env->ExceptionClear(); fid = env->GetFieldID(cls, deobf, "F"); }
-    float v = 0.0f;
-    if (fid) v = env->GetFloatField(obj, fid);
-    env->DeleteLocalRef(cls);
-    return v;
-}
-
-static void SetFloat(JNIEnv* env, jobject obj, const char* obf, const char* deobf, float val)
-{
-    jclass cls = env->GetObjectClass(obj);
-    if (!cls) return;
-    jfieldID fid = env->GetFieldID(cls, obf, "F");
-    if (!fid) { env->ExceptionClear(); fid = env->GetFieldID(cls, deobf, "F"); }
-    if (fid) env->SetFloatField(obj, fid, val);
-    env->DeleteLocalRef(cls);
-}
-
-static std::string GetName(JNIEnv* env, jobject entity)
-{
-    jclass cls = env->GetObjectClass(entity);
-    if (!cls) return "";
-    jmethodID mid = env->GetMethodID(cls, "c", "()Ljava/lang/String;");
-    if (!mid) { env->ExceptionClear(); mid = env->GetMethodID(cls, "getName", "()Ljava/lang/String;"); }
-    env->ExceptionClear();
-    if (!mid) { env->DeleteLocalRef(cls); return ""; }
-    jobject nameObj = env->CallObjectMethod(entity, mid);
-    std::string result;
-    if (nameObj)
-    {
-        const char* str = env->GetStringUTFChars((jstring)nameObj, nullptr);
-        if (str) { result = str; env->ReleaseStringUTFChars((jstring)nameObj, str); }
-        env->DeleteLocalRef(nameObj);
-    }
-    env->DeleteLocalRef(cls);
-    return result;
-}
-
-static float GetHealth(JNIEnv* env, jobject entity)
-{
-    jclass cls = Core::GetInstance().GetJava()->FindClass("pr", "net/minecraft/entity/EntityLivingBase");
-    if (!cls) { env->ExceptionClear(); cls = env->FindClass("net/minecraft/entity/EntityLivingBase"); }
-    if (!cls) return 20.0f;
-    jmethodID mid = env->GetMethodID(cls, "aM", "()F");
-    if (!mid) { env->ExceptionClear(); mid = env->GetMethodID(cls, "getHealth", "()F"); }
-    env->ExceptionClear();
-    if (!mid) { env->DeleteLocalRef(cls); return 20.0f; }
-    float h = env->CallFloatMethod(entity, mid);
-    env->DeleteLocalRef(cls);
-    return h;
-}
-
-static bool IsEntityDead(JNIEnv* env, jobject entity)
-{
-    jclass cls = env->GetObjectClass(entity);
-    if (!cls) return true;
-    jfieldID fid = env->GetFieldID(cls, "J", "Z");
-    if (!fid) { env->ExceptionClear(); fid = env->GetFieldID(cls, "isDead", "Z"); }
-    bool dead = true;
-    if (fid) dead = env->GetBooleanField(entity, fid) == JNI_TRUE;
-    env->DeleteLocalRef(cls);
-    return dead;
-}
-
-// Math helpers
 struct Vector3 { float x, y, z; };
-static float DegToRad(float deg) { return deg * 3.141592653589793f / 180.0f; }
+
 static float WrapAngleTo180(float angle)
 {
     angle = fmodf(angle, 360.0f);
@@ -137,6 +34,7 @@ AimAssistModule::AimAssistModule()
     AddSetting<BooleanSetting>("MousePressCheck", true);
     AddSetting<BooleanSetting>("FOVCircle", true);
     AddSetting<ColorSetting>("FOVColor", ImColor(1.0f, 1.0f, 1.0f, 1.0f));
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void AimAssistModule::OnEnable() { Logger::Log("AimAssist enabled"); }
@@ -145,82 +43,51 @@ void AimAssistModule::OnDisable() { Logger::Log("AimAssist disabled"); }
 void AimAssistModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-
-    JNIEnv* env = GetEnv();
-    if (!env) return;
-
-    jobject mc = GetMc();
-    if (!mc) return;
-
-    jclass mcCls = env->GetObjectClass(mc);
-    if (!mcCls) { env->DeleteLocalRef(mc); return; }
-
-    // Check for GUI state
-    jfieldID csFid = env->GetFieldID(mcCls, "m", "Lauh;");
-    if (!csFid) { env->ExceptionClear(); csFid = env->GetFieldID(mcCls, "currentScreen", "Lnet/minecraft/client/gui/GuiScreen;"); }
-    env->ExceptionClear();
-    if (csFid)
-    {
-        jobject cs = env->GetObjectField(mc, csFid);
-        if (cs) {
-            env->DeleteLocalRef(cs);
-            env->DeleteLocalRef(mcCls);
-            env->DeleteLocalRef(mc);
-            return;
-        }
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
     }
 
-    jfieldID pfid = env->GetFieldID(mcCls, "u", "Lbew;");
-    if (!pfid) { env->ExceptionClear(); pfid = env->GetFieldID(mcCls, "thePlayer", "Lnet/minecraft/client/entity/EntityPlayerSP;"); }
-    jobject player = pfid ? env->GetObjectField(mc, pfid) : nullptr;
-    if (!player) { env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
+    JNIEnv* env = Java::GetThreadEnv();
+    if (!env) return;
+    if (!BridgeHelper::Initialize(env)) return;
 
-    jfieldID wfid = env->GetFieldID(mcCls, "f", "Ladm;");
-    if (!wfid) { env->ExceptionClear(); wfid = env->GetFieldID(mcCls, "theWorld", "Lnet/minecraft/world/World;"); }
-    jobject world = wfid ? env->GetObjectField(mc, wfid) : nullptr;
-    if (!world) { env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
+    jobject player = BridgeHelper::GetPlayer(env);
+    if (!player) return;
+
+    jobject world = BridgeHelper::GetWorldFromEntity(env, player);
+    if (!world) { env->DeleteLocalRef(player); return; }
 
     bool weaponOnly = ((BooleanSetting*)FindSetting("WeaponOnly"))->GetValue();
-    bool sprintOnly = ((BooleanSetting*)FindSetting("SprintingOnly"))->GetValue();
-    bool visCheck = ((BooleanSetting*)FindSetting("VisibilityCheck"))->GetValue();
     bool mouseCheck = ((BooleanSetting*)FindSetting("MousePressCheck"))->GetValue();
 
-    // Get player data
-    float pX = GetDouble(env, player, "r", "posX");
-    float pY = GetDouble(env, player, "s", "posY");
-    float pZ = GetDouble(env, player, "t", "posZ");
-    float pYaw = GetFloat(env, player, "y", "rotationYaw");
-    float pPitch = GetFloat(env, player, "z", "rotationPitch");
+    if (mouseCheck && !(GetAsyncKeyState(VK_LBUTTON) & 0x8000))
+    {
+        env->DeleteLocalRef(world);
+        env->DeleteLocalRef(player);
+        return;
+    }
 
-    // Eye height: 1.62 (standing), 1.54 (sneaking)
-    bool sneaking = false;
-    jclass eCls = Core::GetInstance().GetJava()->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!eCls) { env->ExceptionClear(); eCls = env->FindClass("net/minecraft/entity/Entity"); }
-    if (!eCls) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
-    jmethodID sneakMid = env->GetMethodID(eCls, "aD", "()Z");
-    if (!sneakMid) { env->ExceptionClear(); sneakMid = env->GetMethodID(eCls, "isSneaking", "()Z"); }
-    env->ExceptionClear();
-    if (sneakMid) sneaking = env->CallBooleanMethod(player, sneakMid);
-    float eyeHeight = sneaking ? 1.54f : 1.62f;
+    double pX = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosX);
+    double pY = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosY);
+    double pZ = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosZ);
+    float pYaw = (float)env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetRotationYaw);
+    float pPitch = (float)env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetRotationPitch);
+    bool isSneaking = BridgeHelper::EntityBridge_IsSneaking && env->CallBooleanMethod(player, BridgeHelper::EntityBridge_IsSneaking);
+    float eyeHeight = isSneaking ? 1.54f : 1.62f;
 
-    // Get entity list
-    jclass wCls = env->GetObjectClass(world);
-    jfieldID eflid = env->GetFieldID(wCls, "e", "Ljava/util/List;");
-    if (!eflid) { env->ExceptionClear(); eflid = env->GetFieldID(wCls, "playerEntities", "Ljava/util/List;"); }
-    jobject entityList = eflid ? env->GetObjectField(world, eflid) : nullptr;
-    if (!entityList) { env->DeleteLocalRef(wCls); env->DeleteLocalRef(world); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
+    if (!BridgeHelper::WorldBridge_GetPlayerEntities) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
+    jobject entityList = env->CallObjectMethod(world, BridgeHelper::WorldBridge_GetPlayerEntities);
+    if (!entityList) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
 
-    jclass lCls = env->FindClass("java/util/List");
-    if (!lCls) { env->DeleteLocalRef(eCls); env->DeleteLocalRef(entityList); env->DeleteLocalRef(wCls); env->DeleteLocalRef(world); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
-    jmethodID lSize = env->GetMethodID(lCls, "size", "()I");
-    jmethodID lGet = env->GetMethodID(lCls, "get", "(I)Ljava/lang/Object;");
-    if (!lSize || !lGet) { env->DeleteLocalRef(lCls); env->DeleteLocalRef(eCls); env->DeleteLocalRef(entityList); env->DeleteLocalRef(wCls); env->DeleteLocalRef(world); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
-    jint eSize = env->CallIntMethod(entityList, lSize);
+    jclass listClass = env->FindClass("java/util/List");
+    jmethodID listSize = env->GetMethodID(listClass, "size", "()I");
+    jmethodID listGet = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+    env->DeleteLocalRef(listClass);
+    if (!listSize || !listGet) { env->DeleteLocalRef(entityList); env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
 
-    jmethodID eidMid = env->GetMethodID(eCls, "q", "()I");
-    if (!eidMid) { env->ExceptionClear(); eidMid = env->GetMethodID(eCls, "getEntityId", "()I"); }
-    if (!eidMid) { env->DeleteLocalRef(lCls); env->DeleteLocalRef(eCls); env->DeleteLocalRef(entityList); env->DeleteLocalRef(wCls); env->DeleteLocalRef(world); env->DeleteLocalRef(player); env->DeleteLocalRef(mcCls); env->DeleteLocalRef(mc); return; }
-    jint localId = env->CallIntMethod(player, eidMid);
+    jint localId = BridgeHelper::EntityBridge_GetEntityId ? env->CallIntMethod(player, BridgeHelper::EntityBridge_GetEntityId) : -1;
 
     float fov = ((NumberSetting*)FindSetting("FOV"))->GetValue();
     float aimDist = ((NumberSetting*)FindSetting("Distance"))->GetValue();
@@ -228,78 +95,80 @@ void AimAssistModule::OnUpdate()
     float rYaw = ((NumberSetting*)FindSetting("RandomYaw"))->GetValue();
     float rPitch = ((NumberSetting*)FindSetting("RandomPitch"))->GetValue();
 
-    // Target finding
+    if (weaponOnly)
+    {
+        bool hasWeapon = false;
+        if (BridgeHelper::ELBridge_GetHeldItem)
+        {
+            jobject heldStack = env->CallObjectMethod(player, BridgeHelper::ELBridge_GetHeldItem);
+            if (heldStack && BridgeHelper::ItemStackBridge_GetItem)
+            {
+                jobject item = env->CallObjectMethod(heldStack, BridgeHelper::ItemStackBridge_GetItem);
+                if (item)
+                {
+                    if (BridgeHelper::ItemSwordBridge && env->IsInstanceOf(item, BridgeHelper::ItemSwordBridge))
+                        hasWeapon = true;
+                    env->DeleteLocalRef(item);
+                }
+            }
+            if (heldStack) env->DeleteLocalRef(heldStack);
+        }
+        if (!hasWeapon) { env->DeleteLocalRef(entityList); env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
+    }
+
+    jint size = env->CallIntMethod(entityList, listSize);
     jobject bestTarget = nullptr;
-    float bestDist = FLT_MAX;
-    float bestHealth = FLT_MAX;
     float bestAngleDiff = FLT_MAX;
 
-    for (jint i = 0; i < eSize; i++)
+    for (jint i = 0; i < size; i++)
     {
-        jobject ent = env->CallObjectMethod(entityList, lGet, i);
+        jobject ent = env->CallObjectMethod(entityList, listGet, i);
         if (!ent) continue;
-        jint id = env->CallIntMethod(ent, eidMid);
+        jint id = BridgeHelper::EntityBridge_GetEntityId ? env->CallIntMethod(ent, BridgeHelper::EntityBridge_GetEntityId) : -1;
         if (id == localId) { env->DeleteLocalRef(ent); continue; }
-        if (IsEntityDead(env, ent)) { env->DeleteLocalRef(ent); continue; }
 
-        float eX = GetDouble(env, ent, "r", "posX");
-        float eY = GetDouble(env, ent, "s", "posY");
-        float eZ = GetDouble(env, ent, "t", "posZ");
-        float eH = GetFloat(env, ent, "o", "height");
-        (void)eH;
+        if (BridgeHelper::EntityBridge_IsDead && env->CallBooleanMethod(ent, BridgeHelper::EntityBridge_IsDead))
+        {
+            env->DeleteLocalRef(ent);
+            continue;
+        }
 
-        float health = GetHealth(env, ent);
-        float dx = eX - pX, dy = (eY + 1.62f) - (pY + eyeHeight), dz = eZ - pZ;
+        double eX = env->CallDoubleMethod(ent, BridgeHelper::EntityBridge_GetPosX);
+        double eY = env->CallDoubleMethod(ent, BridgeHelper::EntityBridge_GetPosY);
+        double eZ = env->CallDoubleMethod(ent, BridgeHelper::EntityBridge_GetPosZ);
+
+        float dx = (float)(eX - pX), dy = (float)((eY + 1.62) - (pY + eyeHeight)), dz = (float)(eZ - pZ);
         float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
         if (dist > aimDist) { env->DeleteLocalRef(ent); continue; }
 
-        // Calculate angle difference for FOV check
         float targetYaw = -(float)(atan2(dx, dz) * 180.0f / 3.141592653589793f);
         float yawDiff = WrapAngleTo180(targetYaw - pYaw);
         if (fabs(yawDiff) > fov) { env->DeleteLocalRef(ent); continue; }
 
-        // Priority: closest to crosshair
         float angleDiff = fabs(yawDiff);
         if (angleDiff < bestAngleDiff)
         {
             if (bestTarget) env->DeleteLocalRef(bestTarget);
             bestTarget = ent;
-            bestDist = dist;
-            bestHealth = health;
             bestAngleDiff = angleDiff;
         }
-        else
-        {
-            env->DeleteLocalRef(ent);
-        }
+        else { env->DeleteLocalRef(ent); }
     }
 
-    env->DeleteLocalRef(eCls);
-    env->DeleteLocalRef(lCls);
     env->DeleteLocalRef(entityList);
-    env->DeleteLocalRef(wCls);
     env->DeleteLocalRef(world);
 
-    if (!bestTarget)
-    {
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mcCls);
-        env->DeleteLocalRef(mc);
-        return;
-    }
+    if (!bestTarget) { env->DeleteLocalRef(player); return; }
 
-    // Calculate aim angles
-    float tX = GetDouble(env, bestTarget, "r", "posX");
-    float tY = GetDouble(env, bestTarget, "s", "posY");
-    float tZ = GetDouble(env, bestTarget, "t", "posZ");
-    float tH = GetFloat(env, bestTarget, "o", "height");
+    double tX = env->CallDoubleMethod(bestTarget, BridgeHelper::EntityBridge_GetPosX);
+    double tY = env->CallDoubleMethod(bestTarget, BridgeHelper::EntityBridge_GetPosY);
+    double tZ = env->CallDoubleMethod(bestTarget, BridgeHelper::EntityBridge_GetPosZ);
 
-    float targetHeight = tH - 0.1f;
-    Vector3 headPos = { pX, pY + eyeHeight, pZ };
-    Vector3 targetHeadPos = { tX, tY + targetHeight, tZ };
-    Vector3 targetFootPos = { tX, tY, tZ };
+    float targetHeight = 1.7f;
+    Vector3 headPos = { (float)pX, pY + eyeHeight, (float)pZ };
+    Vector3 targetHeadPos = { (float)tX, (float)tY + targetHeight, (float)tZ };
+    Vector3 targetFootPos = { (float)tX, (float)tY, (float)tZ };
 
-    // Calculate angles
     float dx = targetFootPos.x - headPos.x;
     float dy = targetFootPos.y - headPos.y;
     float dz = targetFootPos.z - headPos.z;
@@ -314,71 +183,49 @@ void AimAssistModule::OnUpdate()
     float headYaw = -(float)(atan2(dx, dz) * 180.0f / 3.141592653589793f);
     float headPitch = -(float)(atan2(dy, dist2D) * 180.0f / 3.141592653589793f);
 
-    // Random offset
     float yawOffset = ((float)rand() / RAND_MAX) * 2.0f * rYaw - rYaw;
     float pitchOffset = ((float)rand() / RAND_MAX) * 2.0f * rPitch - rPitch;
 
-    // Choose targets based on pitch
     float targetYaw, targetPitch;
     if (pPitch > footPitch || pPitch < headPitch)
     {
         float diffFoot = fabs(pPitch - footPitch);
         float diffHead = fabs(pPitch - headPitch);
-        if (diffFoot > diffHead)
-        {
-            targetYaw = headYaw;
-            targetPitch = headPitch;
-        }
-        else
-        {
-            targetYaw = footYaw;
-            targetPitch = footPitch;
-        }
+        if (diffFoot > diffHead) { targetYaw = headYaw; targetPitch = headPitch; }
+        else { targetYaw = footYaw; targetPitch = footPitch; }
     }
-    else
-    {
-        targetYaw = headYaw;
-        targetPitch = pPitch;
-    }
+    else { targetYaw = headYaw; targetPitch = pPitch; }
 
     targetYaw += yawOffset;
     targetPitch += pitchOffset;
 
-    // Apply smoothing
-    float yawDiff = WrapAngleTo180(targetYaw - pYaw);
+    float yawDiff2 = WrapAngleTo180(targetYaw - pYaw);
     float pitchDiff = targetPitch - pPitch;
-
-    pYaw += yawDiff / smooth;
+    pYaw += yawDiff2 / smooth;
     pPitch += pitchDiff / smooth;
-
-    // Clamp pitch
     if (pPitch > 90.0f) pPitch = 90.0f;
     if (pPitch < -90.0f) pPitch = -90.0f;
 
-    SetFloat(env, player, "y", "rotationYaw", pYaw);
-    SetFloat(env, player, "z", "rotationPitch", pPitch);
+    if (BridgeHelper::EntityBridge_SetRotationYaw)
+        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetRotationYaw, (double)pYaw);
+    if (BridgeHelper::EntityBridge_SetRotationPitch)
+        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetRotationPitch, (double)pPitch);
 
     env->DeleteLocalRef(bestTarget);
     env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mcCls);
-    env->DeleteLocalRef(mc);
 }
 
 void AimAssistModule::OnRender()
 {
     if (!IsEnabled()) return;
-
     bool fovCircle = ((BooleanSetting*)FindSetting("FOVCircle"))->GetValue();
     if (!fovCircle) return;
-
     ImColor fovCol = ((ColorSetting*)FindSetting("FOVColor"))->GetValue();
     ImVec2 screen = ImGui::GetIO().DisplaySize;
     float fov = ((NumberSetting*)FindSetting("FOV"))->GetValue();
-
     float radFov = fov * 3.141592653589793f / 180.0f;
-    float radView = 70.0f * 3.141592653589793f / 180.0f; // default MC FOV
+    float radView = 70.0f * 3.141592653589793f / 180.0f;
     float radius = tanf(radFov / 2.0f) / tanf(radView / 2.0f) * screen.x / 1.7325f;
-
     ImGui::GetForegroundDrawList()->AddCircle(
         ImVec2(screen.x * 0.5f, screen.y * 0.5f), radius,
         fovCol, (int)(radius / 3.0f), 1.0f);

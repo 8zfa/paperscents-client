@@ -5,6 +5,7 @@
 NoRotateModule::NoRotateModule()
     : ModuleBase("NoRotate", "Block server head rotation", Category::Player)
 {
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void NoRotateModule::OnEnable() { Logger::Log("NoRotate enabled"); }
@@ -13,6 +14,11 @@ void NoRotateModule::OnDisable() { Logger::Log("NoRotate disabled"); }
 void NoRotateModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
     if (!env) return;

@@ -12,6 +12,7 @@ BowAimModule::BowAimModule()
     AddSetting<BooleanSetting>("Players", true);
     AddSetting<BooleanSetting>("Mobs", false);
     AddSetting<NumberSetting>("Range", 50.0f, 10.0f, 100.0f, 1.0f);
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void BowAimModule::OnEnable() { Logger::Log("BowAim enabled"); }
@@ -20,6 +21,11 @@ void BowAimModule::OnDisable() { Logger::Log("BowAim disabled"); }
 void BowAimModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

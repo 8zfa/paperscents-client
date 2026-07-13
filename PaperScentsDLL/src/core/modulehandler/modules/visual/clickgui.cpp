@@ -6,16 +6,15 @@ ClickGUIModule::ClickGUIModule()
     : ModuleBase("ClickGUI", "Open the ClickGUI", Category::Render)
 {
     SetKeybind(VK_RSHIFT);
+    SetVisible(false);
 }
 
 void ClickGUIModule::OnEnable()
 {
     Menu::GetInstance().Open();
-    Logger::Log("ClickGUI opened");
 }
 
 void ClickGUIModule::OnDisable()
 {
     Menu::GetInstance().Close();
-    Logger::Log("ClickGUI closed");
 }

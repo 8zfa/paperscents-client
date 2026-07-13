@@ -25,4 +25,5 @@ public:
 private:
     std::vector<ESPData> m_RenderData;
     int m_FrameCounter = 0;
+    int m_UpdateInterval = 3;
 };

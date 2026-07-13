@@ -1,6 +1,6 @@
 #pragma once
 #include "../../modulebase.h"
-#include <chrono>
+#include <jni.h>
 
 class VelocityModule : public ModuleBase
 {
@@ -11,6 +11,8 @@ public:
     void OnUpdate() override;
 
 private:
-    std::chrono::steady_clock::time_point m_LastJump;
+    int m_HurtTimePrev = 0;
     int m_JumpCooldown = 0;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

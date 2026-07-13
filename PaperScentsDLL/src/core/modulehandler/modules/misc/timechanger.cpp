@@ -9,6 +9,7 @@ TimeChangerModule::TimeChangerModule()
 {
     AddSetting<EnumSetting>("Time", 0, std::vector<std::string>{"Day", "Night", "Sunset", "Custom"});
     AddSetting<NumberSetting>("CustomTime", 6000.0f, 0.0f, 24000.0f, 1000.0f, "Custom world time");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void TimeChangerModule::OnEnable() { Logger::Log("TimeChanger enabled"); }
@@ -17,6 +18,11 @@ void TimeChangerModule::OnDisable() { Logger::Log("TimeChanger disabled"); }
 void TimeChangerModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

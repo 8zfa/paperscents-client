@@ -12,4 +12,6 @@ public:
 
 private:
     std::chrono::steady_clock::time_point m_LastAttack;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

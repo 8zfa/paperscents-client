@@ -1,128 +1,199 @@
 #include "ka.h"
 #include "../../../core.h"
 #include "../../../utilities/logger.h"
-#include <jni.h>
-#include <algorithm>
+#include "../../../sdk/bridgeHelper.h"
 #include <cmath>
-#include <chrono>
 
 KillAuraModule::KillAuraModule()
     : ModuleBase("KillAura", "Attacks entities automatically", Category::Combat)
 {
-    AddSetting<NumberSetting>("Range", 4.2f, 1.0f, 6.0f, 0.1f, "Attack range");
-    AddSetting<NumberSetting>("CPS", 10.0f, 1.0f, 20.0f, 1.0f, "Clicks per second");
-    AddSetting<BooleanSetting>("Players", true, "Target players");
-    AddSetting<BooleanSetting>("Mobs", false, "Target mobs");
-    AddSetting<BooleanSetting>("AutoBlock", false, "Auto-block with sword");
-    AddSetting<BooleanSetting>("ThroughWalls", false, "Attack through walls");
+    AddSetting<NumberSetting>("Range", 4.2f, 1.0f, 6.0f, 0.1f);
+    AddSetting<NumberSetting>("CPS", 10.0f, 1.0f, 20.0f, 1.0f);
+    AddSetting<NumberSetting>("FOV", 180.0f, 30.0f, 360.0f, 5.0f);
+    AddSetting<BooleanSetting>("Players", true);
+    AddSetting<BooleanSetting>("Mobs", false);
+    AddSetting<BooleanSetting>("ThroughWalls", false);
+    AddSetting<BooleanSetting>("AutoBlock", false);
+    AddSetting<BooleanSetting>("WeaponOnly", true);
     m_LastAttack = std::chrono::steady_clock::now();
+    m_Blocking = false;
+    m_CurrentTargetId = -1;
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
-void KillAuraModule::OnEnable() { Logger::Log("KillAura enabled"); }
-void KillAuraModule::OnDisable() { Logger::Log("KillAura disabled"); }
+void KillAuraModule::OnEnable() { Logger::Log("KillAura enabled"); m_Blocking = false; }
+
+void KillAuraModule::OnDisable()
+{
+    Logger::Log("KillAura disabled");
+    Unblock();
+    m_Blocking = false;
+    m_CurrentTargetId = -1;
+}
+
+static bool CheckFOV(JNIEnv* env, jobject player, jobject entity, float maxFov)
+{
+    if (maxFov >= 360.0f) return true;
+    if (!BridgeHelper::EntityBridge_GetRotationYaw || !BridgeHelper::EntityBridge_GetRotationPitch ||
+        !BridgeHelper::EntityBridge_GetPosX || !BridgeHelper::EntityBridge_GetPosY || !BridgeHelper::EntityBridge_GetPosZ)
+        return true;
+
+    float pYaw = (float)env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetRotationYaw);
+    float pPitch = (float)env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetRotationPitch);
+    double eX = env->CallDoubleMethod(entity, BridgeHelper::EntityBridge_GetPosX);
+    double eY = env->CallDoubleMethod(entity, BridgeHelper::EntityBridge_GetPosY);
+    double eZ = env->CallDoubleMethod(entity, BridgeHelper::EntityBridge_GetPosZ);
+    double pX = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosX);
+    double pY = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosY) + 1.62;
+    double pZ = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosZ);
+
+    double dX = eX - pX;
+    double dY = (eY + (eY - pY) * 0.5) - pY;
+    double dZ = eZ - pZ;
+    double dist = std::sqrt(dX * dX + dY * dY + dZ * dZ);
+    if (dist < 0.1) return true;
+
+    float tYaw = (float)(std::atan2(dZ, dX) * 180.0 / 3.14159265) - 90.0f;
+    float tPitch = -(float)(std::asin(dY / dist) * 180.0 / 3.14159265);
+    float dYaw = std::abs(tYaw - pYaw);
+    if (dYaw > 180) dYaw = 360 - dYaw;
+    float dPitch = std::abs(tPitch - pPitch);
+    return dYaw <= maxFov && dPitch <= maxFov * 0.5f;
+}
+
+bool KillAuraModule::IsValidEntity(JNIEnv* env, jobject entity, jobject player, float range, int fov, bool throughWalls)
+{
+    if (!entity) return false;
+
+    if (BridgeHelper::EntityBridge_IsDead && env->CallBooleanMethod(entity, BridgeHelper::EntityBridge_IsDead))
+        return false;
+
+    if (BridgeHelper::EntityBridge_GetEntityId && env->CallIntMethod(entity, BridgeHelper::EntityBridge_GetEntityId) == m_CurrentTargetId)
+        return false;
+
+    if (BridgeHelper::EntityBridge_GetDistanceToEntity)
+    {
+        double dist = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetDistanceToEntity, entity);
+        if (dist > range || dist < 0.1) return false;
+    }
+
+    if (!CheckFOV(env, player, entity, (float)fov)) return false;
+
+    return true;
+}
+
+void KillAuraModule::Unblock()
+{
+    JNIEnv* env = Java::GetThreadEnv();
+    if (!env || !m_Blocking) return;
+    if (!BridgeHelper::Initialize(env)) return;
+
+    jobject gs = BridgeHelper::GetGameSettings(env);
+    if (gs && BridgeHelper::GSBridge_KeyBindUseItem && BridgeHelper::GSBridge_SetKeyBindState)
+    {
+        jobject kb = env->CallObjectMethod(gs, BridgeHelper::GSBridge_KeyBindUseItem);
+        if (kb)
+        {
+            env->CallVoidMethod(gs, BridgeHelper::GSBridge_SetKeyBindState, kb, JNI_FALSE);
+            env->DeleteLocalRef(kb);
+        }
+    }
+    if (gs) env->DeleteLocalRef(gs);
+    m_Blocking = false;
+}
+
+void KillAuraModule::Block(JNIEnv* env)
+{
+    if (!BridgeHelper::Initialize(env)) return;
+
+    jobject gs = BridgeHelper::GetGameSettings(env);
+    if (gs && BridgeHelper::GSBridge_KeyBindUseItem && BridgeHelper::GSBridge_SetKeyBindState)
+    {
+        jobject kb = env->CallObjectMethod(gs, BridgeHelper::GSBridge_KeyBindUseItem);
+        if (kb)
+        {
+            env->CallVoidMethod(gs, BridgeHelper::GSBridge_SetKeyBindState, kb, JNI_TRUE);
+            env->DeleteLocalRef(kb);
+        }
+    }
+    if (gs) env->DeleteLocalRef(gs);
+    m_Blocking = true;
+}
+
+void KillAuraModule::Attack(JNIEnv* env, jobject entity)
+{
+    if (!entity) return;
+    BridgeHelper::SimulateAttack(env);
+    m_LastAttack = std::chrono::steady_clock::now();
+}
 
 void KillAuraModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
     auto now = std::chrono::steady_clock::now();
     float cps = ((NumberSetting*)FindSetting("CPS"))->GetValue();
     int delayMs = (int)(1000.0f / (std::max)(cps, 1.0f));
     if (std::chrono::duration_cast<std::chrono::milliseconds>(now - m_LastAttack).count() < delayMs)
+    {
+        if (m_Blocking) Unblock();
         return;
+    }
 
-    Java* java = Core::GetInstance().GetJava();
-    if (!java || !java->IsValid()) return;
-    JNIEnv* env = java->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
+    if (!BridgeHelper::Initialize(env)) return;
 
-    jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass) { env->ExceptionClear(); return; }
+    jobject player = BridgeHelper::GetPlayer(env);
+    if (!player) return;
 
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
-
-    const char* worldFields[] = { "f", "field_71441_e", "theWorld" };
-    jfieldID wf = nullptr;
-    for (auto f : worldFields)
-    {
-        wf = env->GetFieldID(mcClass, f, "Ladm;");
-        if (!wf) wf = env->GetFieldID(mcClass, f, "Lnet/minecraft/world/World;");
-        if (wf) break;
-    }
-    if (!wf) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-    jobject world = env->GetObjectField(mc, wf);
-    if (!world) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    const char* playerFields[] = { "u", "field_71439_g", "thePlayer" };
-    jfieldID pf = nullptr;
-    for (auto f : playerFields)
-    {
-        pf = env->GetFieldID(mcClass, f, "Lbew;");
-        if (!pf) pf = env->GetFieldID(mcClass, f, "Lnet/minecraft/client/entity/EntityPlayerSP;");
-        if (pf) break;
-    }
-    if (!pf) { env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-    jobject player = env->GetObjectField(mc, pf);
-    if (!player) { env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    const char* pcFields[] = { "v", "field_71442_b", "playerController" };
-    jfieldID pcf = nullptr;
-    for (auto f : pcFields)
-    {
-        pcf = env->GetFieldID(mcClass, f, "Lbhl;");
-        if (!pcf) pcf = env->GetFieldID(mcClass, f, "Lnet/minecraft/client/multiplayer/PlayerControllerMP;");
-        if (pcf) break;
-    }
-    if (!pcf) { env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-    jobject pc = env->GetObjectField(mc, pcf);
-    if (!pc) { env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass worldClass = java->FindClass("adm", "net/minecraft/world/World");
-    if (!worldClass) { env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    const char* worldEntityFields[] = { "e", "field_73010_i", "playerEntities" };
-    jfieldID wef = nullptr;
-    for (auto f : worldEntityFields)
-    {
-        wef = env->GetFieldID(worldClass, f, "Ljava/util/List;");
-        if (wef) break;
-    }
-    if (!wef) { env->DeleteLocalRef(worldClass); env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-    jobject entityList = env->GetObjectField(world, wef);
-    if (!entityList) { env->DeleteLocalRef(worldClass); env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass listClass = env->FindClass("java/util/List");
-    if (!listClass) { env->DeleteLocalRef(entityList); env->DeleteLocalRef(worldClass); env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-    jmethodID listSize = env->GetMethodID(listClass, "size", "()I");
-    jmethodID listGet = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
-    if (!listSize || !listGet) { env->DeleteLocalRef(listClass); env->DeleteLocalRef(entityList); env->DeleteLocalRef(worldClass); env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jint size = env->CallIntMethod(entityList, listSize);
-    if (size <= 0) { env->DeleteLocalRef(listClass); env->DeleteLocalRef(entityList); env->DeleteLocalRef(worldClass); env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
+    jobject world = BridgeHelper::GetWorldFromEntity(env, player);
+    if (!world) { env->DeleteLocalRef(player); return; }
 
     float range = ((NumberSetting*)FindSetting("Range"))->GetValue();
+    int fov = (int)((NumberSetting*)FindSetting("FOV"))->GetValue();
     bool targetPlayers = ((BooleanSetting*)FindSetting("Players"))->GetValue();
     bool targetMobs = ((BooleanSetting*)FindSetting("Mobs"))->GetValue();
     bool throughWalls = ((BooleanSetting*)FindSetting("ThroughWalls"))->GetValue();
+    bool autoBlock = ((BooleanSetting*)FindSetting("AutoBlock"))->GetValue();
+    bool weaponOnly = ((BooleanSetting*)FindSetting("WeaponOnly"))->GetValue();
 
-    jclass entityClass = java->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!entityClass) { env->DeleteLocalRef(listClass); env->DeleteLocalRef(entityList); env->DeleteLocalRef(worldClass); env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
+    if (!BridgeHelper::WorldBridge_GetEntities) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
+    jobject entityList = env->CallObjectMethod(world, BridgeHelper::WorldBridge_GetEntities);
+    if (!entityList) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
 
-    jmethodID getEntityId = env->GetMethodID(entityClass, "q", "()I");
-    jmethodID getDistance = env->GetMethodID(entityClass, "a", "(Lpk;)D");
-    if (!getEntityId || !getDistance) { env->DeleteLocalRef(entityClass); env->DeleteLocalRef(listClass); env->DeleteLocalRef(entityList); env->DeleteLocalRef(worldClass); env->DeleteLocalRef(pc); env->DeleteLocalRef(player); env->DeleteLocalRef(world); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
+    jclass listClass = env->FindClass("java/util/List");
+    jmethodID listSize = env->GetMethodID(listClass, "size", "()I");
+    jmethodID listGet = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
+    env->DeleteLocalRef(listClass);
+    if (!listSize || !listGet) { env->DeleteLocalRef(entityList); env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
 
-    jint playerId = env->CallIntMethod(player, getEntityId);
+    if (weaponOnly)
+    {
+        bool hasWeapon = false;
+        if (BridgeHelper::ELBridge_GetHeldItem)
+        {
+            jobject heldStack = env->CallObjectMethod(player, BridgeHelper::ELBridge_GetHeldItem);
+            if (heldStack && BridgeHelper::ItemStackBridge_GetItem)
+            {
+                jobject item = env->CallObjectMethod(heldStack, BridgeHelper::ItemStackBridge_GetItem);
+                if (item)
+                {
+                    if (BridgeHelper::ItemSwordBridge && env->IsInstanceOf(item, BridgeHelper::ItemSwordBridge))
+                        hasWeapon = true;
+                    env->DeleteLocalRef(item);
+                }
+            }
+            if (heldStack) env->DeleteLocalRef(heldStack);
+        }
+        if (!hasWeapon) { env->DeleteLocalRef(entityList); env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
+    }
 
-    jfieldID isDeadField = env->GetFieldID(entityClass, "J", "Z");
-
-    jmethodID canSee = env->GetMethodID(entityClass, "b", "(Lpk;)Z");
-
-    jclass playerClass = java->FindClass("wn", "net/minecraft/entity/player/EntityPlayer");
-
+    jint size = env->CallIntMethod(entityList, listSize);
     jobject bestTarget = nullptr;
     double bestDist = range;
 
@@ -130,90 +201,43 @@ void KillAuraModule::OnUpdate()
     {
         jobject entity = env->CallObjectMethod(entityList, listGet, i);
         if (!entity) continue;
+        if (env->IsSameObject(player, entity)) { env->DeleteLocalRef(entity); continue; }
 
-        jint eid = env->CallIntMethod(entity, getEntityId);
-        if (eid == playerId) { env->DeleteLocalRef(entity); continue; }
+        bool isPlayer = BridgeHelper::EntityPlayerSPBridge && env->IsInstanceOf(entity, BridgeHelper::EntityPlayerSPBridge);
+        bool isMob = BridgeHelper::EntityMobBridge && env->IsInstanceOf(entity, BridgeHelper::EntityMobBridge);
+        bool isAnimal = BridgeHelper::EntityAnimalBridge && env->IsInstanceOf(entity, BridgeHelper::EntityAnimalBridge);
 
-        if (isDeadField)
+        bool valid = false;
+        if (targetPlayers && isPlayer) valid = true;
+        else if (targetMobs && (isMob || isAnimal)) valid = true;
+        if (!valid) { env->DeleteLocalRef(entity); continue; }
+
+        if (!IsValidEntity(env, entity, player, range, fov, throughWalls)) { env->DeleteLocalRef(entity); continue; }
+
+        if (BridgeHelper::EntityBridge_GetDistanceToEntity)
         {
-            jboolean dead = env->GetBooleanField(entity, isDeadField);
-            if (dead) { env->DeleteLocalRef(entity); continue; }
+            double dist = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetDistanceToEntity, entity);
+            if (dist < bestDist)
+            {
+                if (bestTarget) env->DeleteLocalRef(bestTarget);
+                bestTarget = entity;
+                bestDist = dist;
+            }
+            else env->DeleteLocalRef(entity);
         }
-
-        bool isPlayer = playerClass ? (env->IsInstanceOf(entity, playerClass) == JNI_TRUE) : true;
-
-        if (targetPlayers && !targetMobs)
-        {
-            if (!isPlayer) { env->DeleteLocalRef(entity); continue; }
-        }
-        else if (!targetPlayers && targetMobs)
-        {
-            if (isPlayer) { env->DeleteLocalRef(entity); continue; }
-        }
-        else if (!targetPlayers && !targetMobs)
-        {
-            env->DeleteLocalRef(entity);
-            continue;
-        }
-
-        jdouble dist = env->CallDoubleMethod(player, getDistance, entity);
-        if (dist > range || dist >= bestDist) { env->DeleteLocalRef(entity); continue; }
-
-        if (!throughWalls && canSee)
-        {
-            jboolean seen = env->CallBooleanMethod(player, canSee, entity);
-            if (!seen) { env->DeleteLocalRef(entity); continue; }
-        }
-
-        if (bestTarget) env->DeleteLocalRef(bestTarget);
-        bestTarget = entity;
-        bestDist = dist;
+        else env->DeleteLocalRef(entity);
     }
-
-    if (playerClass) env->DeleteLocalRef(playerClass);
-    env->DeleteLocalRef(entityClass);
-    env->DeleteLocalRef(listClass);
-    env->DeleteLocalRef(worldClass);
 
     if (bestTarget)
     {
-        jclass pcClass = env->GetObjectClass(pc);
-
-        const char* attackNames[] = { "a", "b", "attackEntity" };
-        jmethodID attackMethod = nullptr;
-        for (auto n : attackNames)
-        {
-            attackMethod = env->GetMethodID(pcClass, n, "(Lwn;Lpk;)V");
-            if (!attackMethod) attackMethod = env->GetMethodID(pcClass, n, "(Lnet/minecraft/client/entity/EntityPlayerSP;Lnet/minecraft/entity/Entity;)V");
-            if (attackMethod) break;
-        }
-
-        if (attackMethod)
-        {
-            env->CallVoidMethod(pc, attackMethod, player, bestTarget);
-            m_LastAttack = std::chrono::steady_clock::now();
-        }
-
-        jclass playerObjClass = env->GetObjectClass(player);
-        jmethodID swingMethod = nullptr;
-        const char* swingNames[] = { "a", "b", "d", "i", "swingItem" };
-        for (auto n : swingNames)
-        {
-            swingMethod = env->GetMethodID(playerObjClass, n, "()V");
-            if (swingMethod) break;
-        }
-        if (swingMethod)
-            env->CallVoidMethod(player, swingMethod);
-
-        env->DeleteLocalRef(playerObjClass);
-        env->DeleteLocalRef(pcClass);
+        Attack(env, bestTarget);
+        if (autoBlock && BridgeHelper::GSBridge_KeyBindUseItem) Block(env);
+        else if (m_Blocking) Unblock();
         env->DeleteLocalRef(bestTarget);
     }
+    else if (m_Blocking) Unblock();
 
     env->DeleteLocalRef(entityList);
-    env->DeleteLocalRef(pc);
-    env->DeleteLocalRef(player);
     env->DeleteLocalRef(world);
-    env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
+    env->DeleteLocalRef(player);
 }

@@ -64,6 +64,7 @@ public:
     }
 
     void Toggle() { SetEnabled(!m_Enabled); }
+    void SetEnabledNoCallbacks(bool enabled) { m_Enabled = enabled; }
 
     template<typename T, typename... Args>
     T* AddSetting(Args&&... args)

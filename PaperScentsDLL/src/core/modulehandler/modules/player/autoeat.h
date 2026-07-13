@@ -13,4 +13,6 @@ public:
 private:
     bool m_IsEating = false;
     int m_LastFoodLevel = 20;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

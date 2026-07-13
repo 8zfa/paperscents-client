@@ -7,6 +7,7 @@ AutoToolModule::AutoToolModule()
 {
     AddSetting<EnumSetting>("Mode", 0, std::vector<std::string>{"Silent", "Normal"});
     AddSetting<BooleanSetting>("Swords", true, "Switch to sword for attacking");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void AutoToolModule::OnEnable() { Logger::Log("AutoTool enabled"); }
@@ -53,6 +54,11 @@ static bool IsPlayerMining(JNIEnv* env, jobject mc, jclass mcClass)
 void AutoToolModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
     if (!env) return;

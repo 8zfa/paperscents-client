@@ -18,4 +18,7 @@ public:
 
 private:
     static std::vector<std::string> m_Friends;
+    char m_InputBuf[128] = {};
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

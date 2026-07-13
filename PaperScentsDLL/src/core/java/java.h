@@ -17,6 +17,11 @@ public:
     jclass FindClass(const std::string& name);
     jclass FindClass(const std::string& obfName, const std::string& deobfName);
 
+    // Phase 3 of SetupLunarClassLoader may discover the actual Lunar bridge
+    // interface from Minecraft's interface list. Store it here so BridgeHelper
+    // can use it without rediscovery.
+    jclass GetBridgeMinecraft() { return m_BridgeMinecraftClass; }
+
 private:
     bool FindJVM();
     bool AttachAsDaemon();
@@ -30,4 +35,6 @@ private:
     jobject m_ClassLoader = nullptr;
     jmethodID m_FindClassMethod = nullptr;
     jmethodID m_LoadClassMethod = nullptr;
+
+    jclass m_BridgeMinecraftClass = nullptr;
 };

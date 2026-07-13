@@ -1,107 +1,64 @@
 #include "step.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
+#include "../../../sdk/bridgeHelper.h"
 #include "../../../utilities/logger.h"
-#include <jni.h>
 
 StepModule::StepModule()
     : ModuleBase("Step", "Step up full blocks", Category::Movement)
 {
     AddSetting<NumberSetting>("Height", 2.0f, 1.0f, 10.0f, 1.0f, "Block height to step");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
-void StepModule::OnEnable()
-{
-    Logger::Log("Step enabled");
-}
+void StepModule::OnEnable() { Logger::Log("Step enabled"); }
 
 void StepModule::OnDisable()
 {
     Logger::Log("Step disabled");
-
-    Java* java = Core::GetInstance().GetJava();
-    if (!java || !java->IsValid()) return;
-    JNIEnv* env = java->GetEnv();
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
+    if (!BridgeHelper::Initialize(env)) return;
 
-    jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass) return;
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
+    jobject player = BridgeHelper::GetPlayer(env);
+    if (!player) return;
 
-    const char* playerFields[] = { "s", "t", "h", "thePlayer" };
-    jobject player = nullptr;
-    jfieldID pf = nullptr;
-    for (auto f : playerFields)
+    // Step height via notch fallback (vanilla only)
+    jclass entityClass = env->FindClass("net/minecraft/entity/Entity");
+    if (entityClass)
     {
-        pf = env->GetFieldID(mcClass, f, "Lbew;");
-        if (!pf) pf = env->GetFieldID(mcClass, f, "Lnet/minecraft/client/entity/EntityPlayerSP;");
-        if (pf) { player = env->GetObjectField(mc, pf); if (player) break; }
+        jfieldID stepField = env->GetFieldID(entityClass, "stepHeight", "F");
+        if (!stepField) env->ExceptionClear();
+        if (stepField) { env->ExceptionClear(); env->SetFloatField(player, stepField, 0.5f); }
+        env->DeleteLocalRef(entityClass);
     }
-
-    if (player)
-    {
-        jclass entityClass = java->FindClass("vg", "net/minecraft/entity/Entity");
-        if (entityClass)
-        {
-            jfieldID stepField = env->GetFieldID(entityClass, "y", "F");
-            if (!stepField) stepField = env->GetFieldID(entityClass, "stepHeight", "F");
-            if (!stepField) stepField = env->GetFieldID(entityClass, "z", "F");
-            if (stepField)
-                env->SetFloatField(player, stepField, 0.5f);
-            env->DeleteLocalRef(entityClass);
-        }
-        env->DeleteLocalRef(player);
-    }
-
-    env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
+    env->DeleteLocalRef(player);
 }
 
 void StepModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-    Java* java = Core::GetInstance().GetJava();
-    if (!java || !java->IsValid()) return;
-    JNIEnv* env = java->GetEnv();
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
+
+    JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
-    env->ExceptionClear();
+    if (!BridgeHelper::Initialize(env)) return;
 
     float height = ((NumberSetting*)FindSetting("Height"))->GetValue();
+    jobject player = BridgeHelper::GetPlayer(env);
+    if (!player) return;
 
-    jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
-    if (!mcClass) return;
-    jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
-    if (!getMc) { env->DeleteLocalRef(mcClass); return; }
-    jobject mc = env->CallStaticObjectMethod(mcClass, getMc);
-    if (!mc) { env->DeleteLocalRef(mcClass); return; }
-
-    const char* playerFields[] = { "s", "t", "h", "thePlayer" };
-    jobject player = nullptr;
-    jfieldID pf = nullptr;
-    for (auto f : playerFields)
+    // Step height via notch fallback (vanilla only — no bridge setter exists)
+    jclass entityClass = env->FindClass("net/minecraft/entity/Entity");
+    if (entityClass)
     {
-        pf = env->GetFieldID(mcClass, f, "Lbew;");
-        if (!pf) pf = env->GetFieldID(mcClass, f, "Lnet/minecraft/client/entity/EntityPlayerSP;");
-        if (pf) { player = env->GetObjectField(mc, pf); if (player) break; }
+        jfieldID stepField = env->GetFieldID(entityClass, "stepHeight", "F");
+        if (!stepField) env->ExceptionClear();
+        if (stepField) { env->ExceptionClear(); env->SetFloatField(player, stepField, height); }
+        env->DeleteLocalRef(entityClass);
     }
-    if (!player) { env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    jclass entityClass = java->FindClass("vg", "net/minecraft/entity/Entity");
-    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); env->DeleteLocalRef(mcClass); return; }
-
-    // Set step height - try multiple field names
-    jfieldID stepField = env->GetFieldID(entityClass, "y", "F");
-    if (!stepField) stepField = env->GetFieldID(entityClass, "stepHeight", "F");
-    if (!stepField) stepField = env->GetFieldID(entityClass, "z", "F");
-    if (!stepField) stepField = env->GetFieldID(entityClass, "A", "F");
-
-    if (stepField)
-        env->SetFloatField(player, stepField, height);
-
-    env->DeleteLocalRef(entityClass);
     env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mc);
-    env->DeleteLocalRef(mcClass);
 }

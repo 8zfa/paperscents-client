@@ -10,6 +10,7 @@ BackTrackModule::BackTrackModule()
     AddSetting<NumberSetting>("Ticks", 5.0f, 1.0f, 20.0f, 1.0f, "Number of ticks to track back");
     AddSetting<BooleanSetting>("Players", true, "Track players");
     AddSetting<BooleanSetting>("Visualize", true, "Visualize backtrack positions");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void BackTrackModule::OnEnable() { Logger::Log("BackTrack enabled"); m_Positions.clear(); m_TickCounter = 0; }
@@ -18,6 +19,11 @@ void BackTrackModule::OnDisable() { Logger::Log("BackTrack disabled"); m_Positio
 void BackTrackModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

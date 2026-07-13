@@ -8,6 +8,7 @@ AutoGGModule::AutoGGModule()
 {
     AddSetting<BooleanSetting>("GG", true, "Say 'gg' on game end");
     AddSetting<BooleanSetting>("GF", false, "Say 'gf' on game end");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void AutoGGModule::OnEnable()
@@ -25,6 +26,12 @@ void AutoGGModule::OnDisable()
 void AutoGGModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
+
     if (m_Triggered) return;
 
     JNIEnv* env = Java::GetThreadEnv();

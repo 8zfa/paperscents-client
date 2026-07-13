@@ -7,4 +7,5 @@ public:
     ClickGUIModule();
     void OnEnable() override;
     void OnDisable() override;
+    void OnUpdate() override {}
 };

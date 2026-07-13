@@ -10,8 +10,7 @@ std::vector<ProcessInfo> ProcessManager::Scan() {
     if (hSnapshot == INVALID_HANDLE_VALUE) return results;
 
     const wchar_t* targets[] = {
-        L"javaw.exe", L"java.exe",
-        L"Lunar Client.exe", L"Badlion Client.exe"
+        L"javaw.exe"
     };
 
     PROCESSENTRY32W pe;

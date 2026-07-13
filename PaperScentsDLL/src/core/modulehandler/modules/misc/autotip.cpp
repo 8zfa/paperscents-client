@@ -7,6 +7,7 @@ AutoTipModule::AutoTipModule()
     : ModuleBase("AutoTip", "Auto tip players", Category::Misc)
 {
     AddSetting<NumberSetting>("Interval", 120.0f, 30.0f, 600.0f, 10.0f, "Interval between tips (seconds)");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void AutoTipModule::OnEnable()
@@ -20,6 +21,11 @@ void AutoTipModule::OnDisable() { Logger::Log("AutoTip disabled"); }
 void AutoTipModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     auto now = std::chrono::steady_clock::now();
     auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - m_LastTip).count();

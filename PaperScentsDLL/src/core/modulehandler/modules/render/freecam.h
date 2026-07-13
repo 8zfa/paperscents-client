@@ -18,4 +18,6 @@ private:
     float m_OriginalPitch = 0.0f;
     POINT m_LastCursor = {};
     bool m_HasStoredPosition = false;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

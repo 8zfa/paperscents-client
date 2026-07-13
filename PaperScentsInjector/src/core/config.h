@@ -6,8 +6,8 @@ struct AppConfig {
     std::string LastDllPath;
     int WindowX = 100;
     int WindowY = 100;
-    int WindowW = 850;
-    int WindowH = 580;
+    int WindowW = 580;
+    int WindowH = 440;
     bool LogVisible = false;
 };
 

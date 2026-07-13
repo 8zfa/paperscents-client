@@ -1,7 +1,7 @@
 #include "antibot.h"
+#include "../../../core.h"
 #include "../../../java/java.h"
-#include "../../../sdk/strayCache.h"
-#include "../../../utilities/jni_helpers.h"
+#include "../../../sdk/bridgeHelper.h"
 #include "../../../utilities/logger.h"
 #include <unordered_set>
 #include <string>
@@ -27,6 +27,7 @@ AntiBotModule::AntiBotModule()
     : ModuleBase("AntiBot", "Hide bots from view", Category::Combat)
 {
     AddSetting<EnumSetting>("Mode", 0, std::vector<std::string>{"Remove", "Invisible"});
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void AntiBotModule::OnEnable()
@@ -42,16 +43,37 @@ void AntiBotModule::OnDisable()
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
-    if (!StrayCache::Minecraft || !StrayCache::MinecraftInstance) return;
+    env->ExceptionClear();
 
-    jobject mc = StrayCache::MinecraftInstance;
-    jobject localPlayer = GetPlayerObject(env, mc);
-    jobject world = GetWorldObject(env, mc);
+    bool bridged = BridgeHelper::Initialize(env);
+    jobject player = bridged ? BridgeHelper::GetPlayer(env) : nullptr;
+    jobject world = bridged && player ? BridgeHelper::GetWorldFromEntity(env, player) : nullptr;
+    jobject mc = nullptr;
+
+    if (!world)
+    {
+        if (!bridged)
+        {
+            Java* java = Core::GetInstance().GetJava();
+            if (!java || !java->IsValid()) return;
+            jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
+            if (!mcClass) return;
+            jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
+            if (!getMc) { env->DeleteLocalRef(mcClass); return; }
+            mc = env->CallStaticObjectMethod(mcClass, getMc);
+            if (!mc) { env->DeleteLocalRef(mcClass); return; }
+            jfieldID wfId = env->GetFieldID(mcClass, "f", "Ladm;");
+            if (!wfId) { env->ExceptionClear(); wfId = env->GetFieldID(mcClass, "theWorld", "Lnet/minecraft/world/World;"); }
+            if (wfId) { env->ExceptionClear(); world = env->GetObjectField(mc, wfId); }
+            env->DeleteLocalRef(mcClass);
+        }
+    }
 
     if (world)
     {
-        jfieldID entitiesField = env->GetFieldID(StrayCache::World, "g", "Ljava/util/List;");
-        if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(StrayCache::World, "loadedEntityList", "Ljava/util/List;"); }
+        jclass worldClass = env->GetObjectClass(world);
+        jfieldID entitiesField = env->GetFieldID(worldClass, "loadedEntityList", "Ljava/util/List;");
+        if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(worldClass, "g", "Ljava/util/List;"); }
         env->ExceptionClear();
 
         if (entitiesField)
@@ -65,33 +87,27 @@ void AntiBotModule::OnDisable()
                 if (sizeMethod && getMethod)
                 {
                     int size = env->CallIntMethod(listObj, sizeMethod);
-
-                    jfieldID invisField = nullptr;
-                    if (StrayCache::Entity)
-                    {
-                        invisField = env->GetFieldID(StrayCache::Entity, "au", "Z");
-                        if (!invisField) { env->ExceptionClear(); invisField = env->GetFieldID(StrayCache::Entity, "isInvisible", "Z"); }
-                        env->ExceptionClear();
-                    }
-
                     for (int i = 0; i < size; i++)
                     {
                         jobject entity = env->CallObjectMethod(listObj, getMethod, i);
                         if (!entity) continue;
-                        if (localPlayer && env->IsSameObject(entity, localPlayer)) { env->DeleteLocalRef(entity); continue; }
+                        if (player && env->IsSameObject(entity, player)) { env->DeleteLocalRef(entity); continue; }
 
                         jint eid = 0;
-                        jmethodID getEID = env->GetMethodID(StrayCache::Entity, "F", "()I");
-                        if (!getEID) { env->ExceptionClear(); getEID = env->GetMethodID(StrayCache::Entity, "getEntityId", "()I"); }
-                        env->ExceptionClear();
-                        if (getEID) eid = env->CallIntMethod(entity, getEID);
+                        jclass eCls = env->FindClass("net/minecraft/entity/Entity");
+                        jmethodID getEID = eCls ? env->GetMethodID(eCls, "getEntityId", "()I") : nullptr;
+                        if (!getEID) { env->ExceptionClear(); }
+                        if (getEID) { env->ExceptionClear(); eid = env->CallIntMethod(entity, getEID); }
+                        if (eCls) env->DeleteLocalRef(eCls);
 
                         if (s_BotIds.count(eid))
                         {
-                            if (invisField)
-                                env->SetBooleanField(entity, invisField, JNI_FALSE);
+                            jclass entCls = env->GetObjectClass(entity);
+                            jfieldID invisField = env->GetFieldID(entCls, "isInvisible", "Z");
+                            if (!invisField) { env->ExceptionClear(); }
+                            if (invisField) { env->ExceptionClear(); env->SetBooleanField(entity, invisField, JNI_FALSE); }
+                            env->DeleteLocalRef(entCls);
                         }
-
                         env->DeleteLocalRef(entity);
                     }
                 }
@@ -99,34 +115,63 @@ void AntiBotModule::OnDisable()
                 env->DeleteLocalRef(listObj);
             }
         }
+        env->DeleteLocalRef(worldClass);
     }
 
-    if (localPlayer) env->DeleteLocalRef(localPlayer);
-    if (world) env->DeleteLocalRef(world);
+    if (player) env->DeleteLocalRef(player);
+    if (mc) env->DeleteLocalRef(mc);
 }
 
 void AntiBotModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
-    if (!StrayCache::Minecraft || !StrayCache::MinecraftInstance || !StrayCache::World || !StrayCache::Entity || !StrayCache::EntityPlayer) return;
-
-    jobject mc = StrayCache::MinecraftInstance;
-    jobject localPlayer = GetPlayerObject(env, mc);
-    jobject world = GetWorldObject(env, mc);
-
-    if (!world) { if (localPlayer) env->DeleteLocalRef(localPlayer); return; }
-
-    jfieldID entitiesField = env->GetFieldID(StrayCache::World, "g", "Ljava/util/List;");
-    if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(StrayCache::World, "loadedEntityList", "Ljava/util/List;"); }
     env->ExceptionClear();
 
-    if (!entitiesField) { env->DeleteLocalRef(world); if (localPlayer) env->DeleteLocalRef(localPlayer); return; }
+    int mode = ((EnumSetting*)FindSetting("Mode"))->GetValue();
+
+    bool bridged = BridgeHelper::Initialize(env);
+    jobject player = bridged ? BridgeHelper::GetPlayer(env) : nullptr;
+    jobject world = bridged && player ? BridgeHelper::GetWorldFromEntity(env, player) : nullptr;
+    jobject mc = nullptr;
+
+    if (!world)
+    {
+        if (!bridged)
+        {
+            Java* java = Core::GetInstance().GetJava();
+            if (!java || !java->IsValid()) return;
+            jclass mcClass = java->FindClass("ave", "net/minecraft/client/Minecraft");
+            if (!mcClass) return;
+            jmethodID getMc = env->GetStaticMethodID(mcClass, "A", "()Lave;");
+            if (!getMc) { env->DeleteLocalRef(mcClass); return; }
+            mc = env->CallStaticObjectMethod(mcClass, getMc);
+            if (!mc) { env->DeleteLocalRef(mcClass); return; }
+            jfieldID wfId = env->GetFieldID(mcClass, "f", "Ladm;");
+            if (!wfId) { env->ExceptionClear(); wfId = env->GetFieldID(mcClass, "theWorld", "Lnet/minecraft/world/World;"); }
+            if (wfId) { env->ExceptionClear(); world = env->GetObjectField(mc, wfId); }
+            env->DeleteLocalRef(mcClass);
+        }
+    }
+
+    if (!world) { if (player) env->DeleteLocalRef(player); return; }
+
+    jclass worldClass = env->GetObjectClass(world);
+    jfieldID entitiesField = env->GetFieldID(worldClass, "loadedEntityList", "Ljava/util/List;");
+    if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(worldClass, "g", "Ljava/util/List;"); }
+    env->ExceptionClear();
+
+    if (!entitiesField) { env->DeleteLocalRef(worldClass); env->DeleteLocalRef(world); if (player) env->DeleteLocalRef(player); return; }
 
     jobject listObj = env->GetObjectField(world, entitiesField);
-    if (!listObj) { env->DeleteLocalRef(world); if (localPlayer) env->DeleteLocalRef(localPlayer); return; }
+    if (!listObj) { env->DeleteLocalRef(worldClass); env->DeleteLocalRef(world); if (player) env->DeleteLocalRef(player); return; }
 
     jclass listClass = env->FindClass("java/util/List");
     jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
@@ -135,31 +180,30 @@ void AntiBotModule::OnUpdate()
     {
         env->DeleteLocalRef(listClass);
         env->DeleteLocalRef(listObj);
+        env->DeleteLocalRef(worldClass);
         env->DeleteLocalRef(world);
-        if (localPlayer) env->DeleteLocalRef(localPlayer);
+        if (player) env->DeleteLocalRef(player);
         return;
     }
 
-    int mode = ((EnumSetting*)FindSetting("Mode"))->GetValue();
     int size = env->CallIntMethod(listObj, sizeMethod);
 
-    jfieldID invisField = env->GetFieldID(StrayCache::Entity, "au", "Z");
-    if (!invisField) { env->ExceptionClear(); invisField = env->GetFieldID(StrayCache::Entity, "isInvisible", "Z"); }
-    env->ExceptionClear();
+    jclass entityClass = env->FindClass("net/minecraft/entity/Entity");
+    if (!entityClass) { env->ExceptionClear(); entityClass = env->FindClass("pk"); }
 
-    jmethodID getNameMethod = env->GetMethodID(StrayCache::Entity, "c", "()Ljava/lang/String;");
-    if (!getNameMethod) { env->ExceptionClear(); getNameMethod = env->GetMethodID(StrayCache::Entity, "getName", "()Ljava/lang/String;"); }
-    env->ExceptionClear();
+    jmethodID getNameMethod = entityClass ? env->GetMethodID(entityClass, "getName", "()Ljava/lang/String;") : nullptr;
+    if (!getNameMethod && entityClass) { env->ExceptionClear(); getNameMethod = env->GetMethodID(entityClass, "c", "()Ljava/lang/String;"); }
+    if (getNameMethod) env->ExceptionClear();
 
-    jmethodID getEID = env->GetMethodID(StrayCache::Entity, "F", "()I");
-    if (!getEID) { env->ExceptionClear(); getEID = env->GetMethodID(StrayCache::Entity, "getEntityId", "()I"); }
-    env->ExceptionClear();
+    jmethodID getEID = entityClass ? env->GetMethodID(entityClass, "getEntityId", "()I") : nullptr;
+    if (!getEID && entityClass) { env->ExceptionClear(); getEID = env->GetMethodID(entityClass, "F", "()I"); }
+    if (getEID) env->ExceptionClear();
 
     for (int i = 0; i < size; i++)
     {
         jobject entity = env->CallObjectMethod(listObj, getMethod, i);
         if (!entity) continue;
-        if (localPlayer && env->IsSameObject(entity, localPlayer)) { env->DeleteLocalRef(entity); continue; }
+        if (player && env->IsSameObject(entity, player)) { env->DeleteLocalRef(entity); continue; }
 
         jint eid = getEID ? env->CallIntMethod(entity, getEID) : 0;
         std::string entName;
@@ -175,20 +219,26 @@ void AntiBotModule::OnUpdate()
         }
 
         bool isBot = IsBotName(entName);
-
         if (isBot)
         {
             s_BotIds.insert(eid);
-
-            if (mode == 1 && invisField)
-                env->SetBooleanField(entity, invisField, JNI_TRUE);
+            if (mode == 1)
+            {
+                jclass entCls = env->GetObjectClass(entity);
+                jfieldID invisField = env->GetFieldID(entCls, "isInvisible", "Z");
+                if (!invisField) { env->ExceptionClear(); }
+                if (invisField) { env->ExceptionClear(); env->SetBooleanField(entity, invisField, JNI_TRUE); }
+                env->DeleteLocalRef(entCls);
+            }
         }
-
         env->DeleteLocalRef(entity);
     }
 
+    if (entityClass) env->DeleteLocalRef(entityClass);
     env->DeleteLocalRef(listClass);
     env->DeleteLocalRef(listObj);
+    env->DeleteLocalRef(worldClass);
     env->DeleteLocalRef(world);
-    if (localPlayer) env->DeleteLocalRef(localPlayer);
+    if (player) env->DeleteLocalRef(player);
+    if (mc) env->DeleteLocalRef(mc);
 }

@@ -30,6 +30,7 @@
 #include "modules/movement/phase.h"
 #include "modules/movement/strafe.h"
 #include "modules/movement/bhop.h"
+#include "modules/movement/eagle.h"
 #include "modules/render/chams.h"
 #include "modules/render/itemesp.h"
 #include "modules/render/armorhud.h"
@@ -45,6 +46,7 @@
 #include "modules/player/nofall.h"
 #include "modules/player/legitscaffold.h"
 #include "modules/player/fastplace.h"
+#include "modules/player/cheststealer.h"
 #include "modules/player/antivoid.h"
 #include "modules/player/norotate.h"
 #include "modules/player/autoeat.h"
@@ -52,7 +54,6 @@
 #include "modules/exploit/disabler.h"
 #include "modules/visual/arraylist.h"
 #include "modules/visual/clickgui.h"
-#include "modules/visual/watermark.h"
 #include "modules/visual/targethud.h"
 #include "modules/visual/keystrokes.h"
 #include "modules/visual/coordinates.h"
@@ -85,6 +86,7 @@ void RegisterModules()
     handler.RegisterModule(new BackTrackModule());
     handler.RegisterModule(new FakeLagModule());
     handler.RegisterModule(new TriggerBotModule());
+    handler.RegisterModule(new AutoBlockModule());
     handler.RegisterModule(new WTapModule());
     handler.RegisterModule(new BowAimModule());
     handler.RegisterModule(new RodAuraModule());
@@ -103,6 +105,8 @@ void RegisterModules()
     handler.RegisterModule(new TimerModule());
     handler.RegisterModule(new StrafeModule());
     handler.RegisterModule(new BHopModule());
+    handler.RegisterModule(new InvMoveModule());
+    handler.RegisterModule(new EagleModule());
 
     // Render
     handler.RegisterModule(new ClickGUIModule());
@@ -120,12 +124,12 @@ void RegisterModules()
     handler.RegisterModule(new CoordinatesModule());
     handler.RegisterModule(new KeyStrokesModule());
     handler.RegisterModule(new ArrayListModule());
-    handler.RegisterModule(new WatermarkModule());
     handler.RegisterModule(new TargetHUDModule());
 
     // Player
     handler.RegisterModule(new AutoToolModule());
     handler.RegisterModule(new FastPlaceModule());
+    handler.RegisterModule(new ChestStealerModule());
     handler.RegisterModule(new FastMineModule());
     handler.RegisterModule(new LegitScaffoldModule());
     handler.RegisterModule(new ScaffoldModule());
@@ -156,6 +160,5 @@ void RegisterModules()
     auto* sprint = handler.GetModule("Sprint");
     if (sprint) sprint->SetEnabled(true);
 
-    auto* watermark = handler.GetModule("Watermark");
-    if (watermark) watermark->SetEnabled(true);
+
 }

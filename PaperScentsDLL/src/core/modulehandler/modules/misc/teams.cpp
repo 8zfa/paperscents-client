@@ -6,6 +6,7 @@ TeamsModule::TeamsModule()
     : ModuleBase("Teams", "Respect team colors in attacks", Category::Misc)
 {
     AddSetting<EnumSetting>("Mode", 0, std::vector<std::string>{"Color", "Scoreboard", "Both"});
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void TeamsModule::OnEnable() { Logger::Log("Teams enabled"); }
@@ -14,6 +15,11 @@ void TeamsModule::OnDisable() { Logger::Log("Teams disabled"); }
 void TeamsModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Core::GetInstance().GetJava()->GetEnv();
     if (!env) return;

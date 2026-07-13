@@ -128,6 +128,7 @@
     <ClCompile Include="src\core\modulehandler\modules\movement\phase.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\movement\strafe.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\movement\bhop.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\movement\eagle.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\render\esp.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\render\fullbright.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\render\tracers.cpp" />
@@ -139,6 +140,7 @@
     <ClCompile Include="src\core\modulehandler\modules\player\nofall.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\player\legitscaffold.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\player\fastplace.cpp" />
+    <ClCompile Include="src\core\modulehandler\modules\player\cheststealer.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\player\antivoid.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\player\norotate.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\misc\antibot.cpp" />
@@ -148,12 +150,12 @@
     <ClCompile Include="src\core\modulehandler\modules\exploit\disabler.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\visual\arraylist.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\visual\clickgui.cpp" />
-    <ClCompile Include="src\core\modulehandler\modules\visual\watermark.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\visual\targethud.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\visual\keystrokes.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\visual\coordinates.cpp" />
     <ClCompile Include="src\core\sdk\sdk.cpp" />
     <ClCompile Include="src\core\sdk\strayCache.cpp" />
+    <ClCompile Include="src\core\sdk\bridgeHelper.cpp" />
     <ClCompile Include="src\core\sdk\net\minecraft\client\Minecraft.cpp" />
     <ClCompile Include="src\core\sdk\net\minecraft\client\entity\EntityPlayerSP.cpp" />
     <ClCompile Include="src\core\sdk\net\minecraft\entity\Entity.cpp" />
@@ -231,6 +233,7 @@
     <ClInclude Include="src\core\modulehandler\modules\player\nofall.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\legitscaffold.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\fastplace.h" />
+    <ClInclude Include="src\core\modulehandler\modules\player\cheststealer.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\antivoid.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\autoeat.h" />
     <ClInclude Include="src\core\modulehandler\modules\player\norotate.h" />
@@ -251,6 +254,7 @@
     <ClInclude Include="src\core\modulehandler\modules\movement\phase.h" />
     <ClInclude Include="src\core\modulehandler\modules\movement\strafe.h" />
     <ClInclude Include="src\core\modulehandler\modules\movement\bhop.h" />
+    <ClInclude Include="src\core\modulehandler\modules\movement\eagle.h" />
     <ClInclude Include="src\core\modulehandler\modules\render\chams.h" />
     <ClInclude Include="src\core\modulehandler\modules\render\itemesp.h" />
     <ClInclude Include="src\core\modulehandler\modules\render\armorhud.h" />
@@ -270,12 +274,12 @@
     <ClInclude Include="src\core\modulehandler\modules\stub_modules.h" />
     <ClInclude Include="src\core\modulehandler\modules\visual\arraylist.h" />
     <ClInclude Include="src\core\modulehandler\modules\visual\clickgui.h" />
-    <ClInclude Include="src\core\modulehandler\modules\visual\watermark.h" />
     <ClInclude Include="src\core\modulehandler\modules\visual\targethud.h" />
     <ClInclude Include="src\core\modulehandler\modules\visual\keystrokes.h" />
     <ClInclude Include="src\core\modulehandler\modules\visual\coordinates.h" />
     <ClInclude Include="src\core\sdk\sdk.h" />
     <ClInclude Include="src\core\sdk\strayCache.h" />
+    <ClInclude Include="src\core\sdk\bridgeHelper.h" />
     <ClInclude Include="src\core\sdk\net\minecraft\client\Minecraft.h" />
     <ClInclude Include="src\core\sdk\net\minecraft\client\entity\EntityPlayerSP.h" />
     <ClInclude Include="src\core\sdk\net\minecraft\entity\Entity.h" />

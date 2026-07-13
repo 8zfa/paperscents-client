@@ -38,6 +38,7 @@ void ModuleHandler::OnUpdate()
     if (!m_Initialized) return;
     auto* java = Core::GetInstance().GetJava();
     JNIEnv* env = (java && java->IsValid()) ? java->GetEnv() : nullptr;
+    if (env) env->ExceptionClear();
     for (auto* module : m_Modules)
     {
         if (module->IsEnabled())
@@ -53,11 +54,11 @@ void ModuleHandler::OnRender()
     if (!m_Initialized) return;
     auto* java = Core::GetInstance().GetJava();
     JNIEnv* env = (java && java->IsValid()) ? java->GetEnv() : nullptr;
+    if (env) env->ExceptionClear();
     for (auto* module : m_Modules)
     {
         if (module->IsEnabled())
         {
-            if (env) env->ExceptionClear();
             module->OnRender();
         }
     }

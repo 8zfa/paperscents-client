@@ -25,8 +25,8 @@ void ConfigManager::Load() {
         m_Config.LastDllPath = j.value("lastDllPath", "");
         m_Config.WindowX = j.value("windowX", 100);
         m_Config.WindowY = j.value("windowY", 100);
-        m_Config.WindowW = j.value("windowW", 600);
-        m_Config.WindowH = j.value("windowH", 450);
+        m_Config.WindowW = j.value("windowW", 580);
+        m_Config.WindowH = j.value("windowH", 440);
         m_Config.LogVisible = j.value("logVisible", false);
     } catch (...) {}
 }

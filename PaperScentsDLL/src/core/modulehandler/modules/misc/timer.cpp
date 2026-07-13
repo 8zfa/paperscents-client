@@ -7,6 +7,7 @@ TimerModule::TimerModule()
     : ModuleBase("Timer", "Change game speed", Category::Movement)
 {
     AddSetting<NumberSetting>("Speed", 1.0f, 0.1f, 10.0f, 0.1f, "Game speed multiplier");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void TimerModule::OnEnable() { Logger::Log("Timer enabled"); }
@@ -41,6 +42,11 @@ void TimerModule::OnDisable()
 void TimerModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

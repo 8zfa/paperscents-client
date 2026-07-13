@@ -7,6 +7,7 @@
 NoHurtCamModule::NoHurtCamModule()
     : ModuleBase("NoHurtCam", "Disables hurt camera effect", Category::Render)
 {
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void NoHurtCamModule::OnEnable() { Logger::Log("NoHurtCam enabled"); }
@@ -15,6 +16,11 @@ void NoHurtCamModule::OnDisable() { Logger::Log("NoHurtCam disabled"); }
 void NoHurtCamModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

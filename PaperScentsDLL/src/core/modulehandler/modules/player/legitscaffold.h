@@ -14,4 +14,6 @@ private:
     std::chrono::steady_clock::time_point m_LastPlace;
     bool m_Towered = false;
     bool m_WasKeyDown = false;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

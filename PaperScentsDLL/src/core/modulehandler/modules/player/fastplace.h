@@ -11,9 +11,8 @@ public:
     void OnUpdate() override;
 
 private:
-    jfieldID m_CachedTimerID = nullptr;
-    jclass m_MinecraftClass = nullptr;
-    jmethodID m_GetMinecraft = nullptr;
-    jfieldID m_TimerField = nullptr;
-    bool m_Cached = false;
+    bool CanPlace(JNIEnv* env, jobject player);
+    int m_DelayTicks = 0;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

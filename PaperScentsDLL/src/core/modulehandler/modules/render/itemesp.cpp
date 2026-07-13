@@ -6,65 +6,12 @@
 #include <imgui.h>
 #include <cmath>
 
-bool ItemESPModule::WorldToScreen(JNIEnv* env, double x, double y, double z, float& sx, float& sy)
-{
-    jclass mcCls = env->GetObjectClass(StrayCache::MinecraftInstance);
-    if (!mcCls) return false;
-
-    jfieldID rmField = env->GetFieldID(mcCls, "ad", "Lcgs;");
-    if (!rmField) { env->ExceptionClear(); rmField = env->GetFieldID(mcCls, "renderManager", "Lnet/minecraft/client/renderer/entity/RenderManager;"); }
-    env->ExceptionClear();
-    if (!rmField) { env->DeleteLocalRef(mcCls); return false; }
-
-    jobject rm = env->GetObjectField(StrayCache::MinecraftInstance, rmField);
-    env->DeleteLocalRef(mcCls);
-    if (!rm) return false;
-
-    jclass rmCls = env->GetObjectClass(rm);
-    if (!rmCls) { env->DeleteLocalRef(rm); return false; }
-
-    jfieldID vxID = env->GetFieldID(rmCls, "c", "D");
-    if (!vxID) { env->ExceptionClear(); vxID = env->GetFieldID(rmCls, "viewerPosX", "D"); }
-    env->ExceptionClear();
-    jfieldID vyID = env->GetFieldID(rmCls, "d", "D");
-    if (!vyID) { env->ExceptionClear(); vyID = env->GetFieldID(rmCls, "viewerPosY", "D"); }
-    env->ExceptionClear();
-    jfieldID vzID = env->GetFieldID(rmCls, "e", "D");
-    if (!vzID) { env->ExceptionClear(); vzID = env->GetFieldID(rmCls, "viewerPosZ", "D"); }
-    env->ExceptionClear();
-
-    if (!vxID || !vyID || !vzID) { env->DeleteLocalRef(rmCls); env->DeleteLocalRef(rm); return false; }
-
-    double vx = env->GetDoubleField(rm, vxID);
-    double vy = env->GetDoubleField(rm, vyID);
-    double vz = env->GetDoubleField(rm, vzID);
-
-    env->DeleteLocalRef(rmCls);
-    env->DeleteLocalRef(rm);
-
-    double dx = x - vx;
-    double dy = y - vy;
-    double dz = z - vz;
-    if (fabs(dz) < 0.01) dz = 0.01;
-
-    ImVec2 screen = ImGui::GetIO().DisplaySize;
-    ImVec2 center(screen.x * 0.5f, screen.y * 0.5f);
-    double fov = 70.0 * 0.5 * 3.141592653589793 / 180.0;
-    double tanFov = tan(fov);
-    double aspect = screen.x / screen.y;
-    double ax = dx / dz;
-    double ay = dy / dz;
-    sx = (float)(center.x + center.x * ax / (tanFov * aspect));
-    sy = (float)(center.y - center.y * ay / tanFov);
-
-    return sx >= 0 && sx <= screen.x && sy >= 0 && sy <= screen.y;
-}
-
 ItemESPModule::ItemESPModule()
     : ModuleBase("ItemESP", "Shows dropped items through walls", Category::Render)
 {
     AddSetting<ColorSetting>("Color", ImColor(1.0f, 1.0f, 0.0f, 0.8f));
     AddSetting<BooleanSetting>("Nametags", true, "Show item name tags");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void ItemESPModule::OnEnable() { Logger::Log("ItemESP enabled"); }
@@ -73,7 +20,11 @@ void ItemESPModule::OnDisable() { Logger::Log("ItemESP disabled"); }
 void ItemESPModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-    if (++m_FrameCounter % 3 != 0) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
@@ -84,38 +35,14 @@ void ItemESPModule::OnUpdate()
     jobject world = GetWorldObject(env, mc);
     if (!world) { env->DeleteLocalRef(mc); return; }
 
-    jfieldID entitiesField = env->GetFieldID(StrayCache::World, "g", "Ljava/util/List;");
-    if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(StrayCache::World, "loadedEntityList", "Ljava/util/List;"); }
-    env->ExceptionClear();
-    if (!entitiesField) { env->DeleteLocalRef(world); env->DeleteLocalRef(mc); return; }
+    if (!StrayCache::World || !StrayCache::World_loadedEntityList || !StrayCache::ListClass || !StrayCache::List_size || !StrayCache::List_get)
+    { env->DeleteLocalRef(world); env->DeleteLocalRef(mc); return; }
 
-    jobject listObj = env->GetObjectField(world, entitiesField);
+    jobject listObj = env->GetObjectField(world, StrayCache::World_loadedEntityList);
     if (!listObj) { env->DeleteLocalRef(world); env->DeleteLocalRef(mc); return; }
-
-    jclass listClass = env->FindClass("java/util/List");
-    jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
-    jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
-    if (!sizeMethod || !getMethod)
-    {
-        env->DeleteLocalRef(listClass);
-        env->DeleteLocalRef(listObj);
-        env->DeleteLocalRef(world);
-        env->DeleteLocalRef(mc);
-        return;
-    }
 
     jclass entityItemCls = env->FindClass("sa");
     if (!entityItemCls) { env->ExceptionClear(); entityItemCls = env->FindClass("net/minecraft/entity/item/EntityItem"); }
-    env->ExceptionClear();
-
-    jfieldID posXID = env->GetFieldID(StrayCache::Entity, "r", "D");
-    if (!posXID) { env->ExceptionClear(); posXID = env->GetFieldID(StrayCache::Entity, "posX", "D"); }
-    env->ExceptionClear();
-    jfieldID posYID = env->GetFieldID(StrayCache::Entity, "s", "D");
-    if (!posYID) { env->ExceptionClear(); posYID = env->GetFieldID(StrayCache::Entity, "posY", "D"); }
-    env->ExceptionClear();
-    jfieldID posZID = env->GetFieldID(StrayCache::Entity, "t", "D");
-    if (!posZID) { env->ExceptionClear(); posZID = env->GetFieldID(StrayCache::Entity, "posZ", "D"); }
     env->ExceptionClear();
 
     jmethodID getItemStackMid = nullptr;
@@ -127,12 +54,12 @@ void ItemESPModule::OnUpdate()
         getItemStackMid = gisMid;
     }
 
-    jint eSize = env->CallIntMethod(listObj, sizeMethod);
+    jint eSize = env->CallIntMethod(listObj, StrayCache::List_size);
     std::vector<ItemESPData> newData;
 
     for (jint i = 0; i < eSize; i++)
     {
-        jobject entity = env->CallObjectMethod(listObj, getMethod, i);
+        jobject entity = env->CallObjectMethod(listObj, StrayCache::List_get, i);
         if (!entity) continue;
 
         bool isItem = entityItemCls && env->IsInstanceOf(entity, entityItemCls);
@@ -169,16 +96,15 @@ void ItemESPModule::OnUpdate()
 
         if (displayName.empty()) { env->DeleteLocalRef(entity); continue; }
 
-        double eX = posXID ? env->GetDoubleField(entity, posXID) : 0.0;
-        double eY = posYID ? env->GetDoubleField(entity, posYID) : 0.0;
-        double eZ = posZID ? env->GetDoubleField(entity, posZID) : 0.0;
+        double eX = GetEntityPosX(env, entity);
+        double eY = GetEntityPosY(env, entity);
+        double eZ = GetEntityPosZ(env, entity);
 
         newData.push_back({ eX, eY, eZ, displayName });
         env->DeleteLocalRef(entity);
     }
 
     if (entityItemCls) env->DeleteLocalRef(entityItemCls);
-    env->DeleteLocalRef(listClass);
     env->DeleteLocalRef(listObj);
     env->DeleteLocalRef(world);
     env->DeleteLocalRef(mc);

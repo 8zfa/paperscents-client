@@ -13,14 +13,20 @@ TracersModule::TracersModule()
     AddSetting<BooleanSetting>("Players", true, "Show tracers to players");
     AddSetting<BooleanSetting>("Mobs", false, "Show tracers to mobs");
     AddSetting<ColorSetting>("Color", ImColor(1.0f, 1.0f, 1.0f, 0.8f));
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void TracersModule::OnEnable() { Logger::Log("Tracers enabled"); }
 void TracersModule::OnDisable() { Logger::Log("Tracers disabled"); }
 
-void TracersModule::OnRender()
+void TracersModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
@@ -33,82 +39,21 @@ void TracersModule::OnRender()
     jobject world = GetWorldObject(env, mc);
     if (!world) { env->DeleteLocalRef(localPlayer); return; }
 
-    jfieldID entitiesField = env->GetFieldID(StrayCache::World, "g", "Ljava/util/List;");
-    if (!entitiesField) { env->ExceptionClear(); entitiesField = env->GetFieldID(StrayCache::World, "loadedEntityList", "Ljava/util/List;"); }
-    env->ExceptionClear();
+    if (!StrayCache::World_loadedEntityList || !StrayCache::ListClass || !StrayCache::List_size || !StrayCache::List_get)
+    { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); return; }
 
-    if (!entitiesField) { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); return; }
-
-    jobject listObj = env->GetObjectField(world, entitiesField);
+    jobject listObj = env->GetObjectField(world, StrayCache::World_loadedEntityList);
     if (!listObj) { env->DeleteLocalRef(world); env->DeleteLocalRef(localPlayer); return; }
-
-    jclass listClass = env->FindClass("java/util/List");
-    jmethodID sizeMethod = env->GetMethodID(listClass, "size", "()I");
-    jmethodID getMethod = env->GetMethodID(listClass, "get", "(I)Ljava/lang/Object;");
-    if (!sizeMethod || !getMethod)
-    {
-        env->DeleteLocalRef(listClass);
-        env->DeleteLocalRef(listObj);
-        env->DeleteLocalRef(world);
-        env->DeleteLocalRef(localPlayer);
-        return;
-    }
 
     bool showPlayers = ((BooleanSetting*)FindSetting("Players"))->GetValue();
     bool showMobs = ((BooleanSetting*)FindSetting("Mobs"))->GetValue();
-    ImColor color = ((ColorSetting*)FindSetting("Color"))->GetValue();
-    ImU32 col = color;
 
-    ImDrawList* draw = ImGui::GetForegroundDrawList();
-    ImVec2 screen = ImGui::GetIO().DisplaySize;
-    ImVec2 center(screen.x * 0.5f, screen.y * 0.5f);
-
-    jfieldID posXID = env->GetFieldID(StrayCache::Entity, "r", "D");
-    if (!posXID) { env->ExceptionClear(); posXID = env->GetFieldID(StrayCache::Entity, "posX", "D"); }
-    env->ExceptionClear();
-    jfieldID posYID = env->GetFieldID(StrayCache::Entity, "s", "D");
-    if (!posYID) { env->ExceptionClear(); posYID = env->GetFieldID(StrayCache::Entity, "posY", "D"); }
-    env->ExceptionClear();
-    jfieldID posZID = env->GetFieldID(StrayCache::Entity, "t", "D");
-    if (!posZID) { env->ExceptionClear(); posZID = env->GetFieldID(StrayCache::Entity, "posZ", "D"); }
-    env->ExceptionClear();
-
-    jclass renderManagerClass = env->FindClass("cgs");
-    if (!renderManagerClass) { env->ExceptionClear(); renderManagerClass = env->FindClass("net/minecraft/client/renderer/entity/RenderManager"); }
-
-    jfieldID rmField = nullptr;
-    jobject rm = nullptr;
-    jfieldID viewX = nullptr, viewY = nullptr, viewZ = nullptr;
-
-    if (renderManagerClass)
-    {
-        rmField = env->GetFieldID(StrayCache::Minecraft, "ad", "Lcgs;");
-        if (!rmField) { env->ExceptionClear(); rmField = env->GetFieldID(StrayCache::Minecraft, "renderManager", "Lcgs;"); }
-        env->ExceptionClear();
-
-        if (rmField)
-        {
-            rm = env->GetObjectField(mc, rmField);
-            if (rm)
-            {
-                viewX = env->GetFieldID(renderManagerClass, "c", "D");
-                if (!viewX) { env->ExceptionClear(); viewX = env->GetFieldID(renderManagerClass, "viewerPosX", "D"); }
-                env->ExceptionClear();
-                viewY = env->GetFieldID(renderManagerClass, "d", "D");
-                if (!viewY) { env->ExceptionClear(); viewY = env->GetFieldID(renderManagerClass, "viewerPosY", "D"); }
-                env->ExceptionClear();
-                viewZ = env->GetFieldID(renderManagerClass, "e", "D");
-                if (!viewZ) { env->ExceptionClear(); viewZ = env->GetFieldID(renderManagerClass, "viewerPosZ", "D"); }
-                env->ExceptionClear();
-            }
-        }
-    }
-
-    int size = env->CallIntMethod(listObj, sizeMethod);
+    jint size = env->CallIntMethod(listObj, StrayCache::List_size);
+    std::vector<TracerData> newData;
 
     for (int i = 0; i < size; i++)
     {
-        jobject entity = env->CallObjectMethod(listObj, getMethod, i);
+        jobject entity = env->CallObjectMethod(listObj, StrayCache::List_get, i);
         if (!entity) continue;
 
         if (env->IsSameObject(entity, localPlayer)) { env->DeleteLocalRef(entity); continue; }
@@ -118,32 +63,67 @@ void TracersModule::OnRender()
         if (isPlayer && !showPlayers) { env->DeleteLocalRef(entity); continue; }
         if (!isPlayer && !showMobs) { env->DeleteLocalRef(entity); continue; }
 
-        double ex = posXID ? env->GetDoubleField(entity, posXID) : 0.0;
-        double ey = posYID ? env->GetDoubleField(entity, posYID) : 0.0;
-        double ez = posZID ? env->GetDoubleField(entity, posZID) : 0.0;
+        double ex = GetEntityPosX(env, entity);
+        double ey = GetEntityPosY(env, entity);
+        double ez = GetEntityPosZ(env, entity);
 
-        double vx = (viewX && rm) ? env->GetDoubleField(rm, viewX) : 0.0;
-        double vy = (viewY && rm) ? env->GetDoubleField(rm, viewY) : 0.0;
-        double vz = (viewZ && rm) ? env->GetDoubleField(rm, viewZ) : 0.0;
+        newData.push_back({ ex, ey, ez, isPlayer });
+        env->DeleteLocalRef(entity);
+    }
 
-        double dx = ex - vx;
-        double dy = (ey + 1.0) - vy;
-        double dz = ez - vz;
+    env->DeleteLocalRef(listObj);
+    env->DeleteLocalRef(world);
+    env->DeleteLocalRef(localPlayer);
+
+    m_RenderData = newData;
+}
+
+void TracersModule::OnRender()
+{
+    if (!IsEnabled() || m_RenderData.empty()) return;
+
+    JNIEnv* env = Java::GetThreadEnv();
+    if (!env) return;
+    if (!StrayCache::MinecraftInstance || !StrayCache::Minecraft || !StrayCache::RenderManagerClass ||
+        !StrayCache::Minecraft_renderManager || !StrayCache::RenderManager_viewerPosX ||
+        !StrayCache::RenderManager_viewerPosY || !StrayCache::RenderManager_viewerPosZ) return;
+
+    jobject mc = StrayCache::MinecraftInstance;
+    jobject rm = env->GetObjectField(mc, StrayCache::Minecraft_renderManager);
+    if (!rm) return;
+
+    double vx = env->GetDoubleField(rm, StrayCache::RenderManager_viewerPosX);
+    double vy = env->GetDoubleField(rm, StrayCache::RenderManager_viewerPosY);
+    double vz = env->GetDoubleField(rm, StrayCache::RenderManager_viewerPosZ);
+    env->DeleteLocalRef(rm);
+
+    ImColor color = ((ColorSetting*)FindSetting("Color"))->GetValue();
+    ImU32 col = color;
+
+    ImDrawList* draw = ImGui::GetForegroundDrawList();
+    ImVec2 screen = ImGui::GetIO().DisplaySize;
+    ImVec2 center(screen.x * 0.5f, screen.y * 0.5f);
+
+    double fov = 70.0 * 0.5 * 3.14159 / 180.0;
+    double tanFov = tan(fov);
+    double aspect = screen.x / screen.y;
+
+    for (auto& data : m_RenderData)
+    {
+        double dx = data.x - vx;
+        double dy = (data.y + 1.0) - vy;
+        double dz = data.z - vz;
 
         if (fabs(dz) < 0.01) dz = 0.01;
-
-        ImVec2 screenPos;
-        double fov = 70.0 * 0.5 * 3.14159 / 180.0;
-        double tanFov = tan(fov);
-        double aspect = screen.x / screen.y;
 
         double ax = dx / dz;
         double ay = dy / dz;
 
+        ImVec2 screenPos;
         screenPos.x = (float)(center.x + center.x * ax / (tanFov * aspect));
         screenPos.y = (float)(center.y - center.y * ay / tanFov);
 
-        if (screenPos.x < 0 || screenPos.x > screen.x || screenPos.y < 0 || screenPos.y > screen.y) { env->DeleteLocalRef(entity); continue; }
+        if (screenPos.x < 0 || screenPos.x > screen.x || screenPos.y < 0 || screenPos.y > screen.y) continue;
 
         draw->AddLine(center, screenPos, col, 1.0f);
 
@@ -156,14 +136,5 @@ void TracersModule::OnRender()
             ImVec2 a2(screenPos.x + cosf(angle + 0.5f) * arrowSize, screenPos.y + sinf(angle + 0.5f) * arrowSize);
             draw->AddTriangleFilled(screenPos, a1, a2, col);
         }
-
-        env->DeleteLocalRef(entity);
     }
-
-    if (rm) env->DeleteLocalRef(rm);
-    if (renderManagerClass) env->DeleteLocalRef(renderManagerClass);
-    env->DeleteLocalRef(listClass);
-    env->DeleteLocalRef(listObj);
-    env->DeleteLocalRef(world);
-    env->DeleteLocalRef(localPlayer);
 }

@@ -11,4 +11,6 @@ public:
 
 private:
     bool m_Triggered = false;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

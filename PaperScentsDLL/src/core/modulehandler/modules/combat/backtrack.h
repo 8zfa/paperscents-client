@@ -21,4 +21,6 @@ public:
 private:
     std::vector<BackTrackPos> m_Positions;
     int m_TickCounter;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

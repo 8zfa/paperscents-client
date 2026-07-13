@@ -11,6 +11,7 @@ RodAuraModule::RodAuraModule()
     AddSetting<NumberSetting>("Range", 4.0f, 1.0f, 6.0f, 0.1f, "Rod range");
     AddSetting<NumberSetting>("Delay", 1000.0f, 500.0f, 2000.0f, 50.0f, "Delay between rod uses in ms");
     m_LastUse = std::chrono::steady_clock::now();
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void RodAuraModule::OnEnable() { Logger::Log("RodAura enabled"); }
@@ -19,7 +20,11 @@ void RodAuraModule::OnDisable() { Logger::Log("RodAura disabled"); }
 void RodAuraModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-    if (++m_FrameCounter % 3 != 0) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     auto now = std::chrono::steady_clock::now();
     int delayMs = (int)((NumberSetting*)FindSetting("Delay"))->GetValue();

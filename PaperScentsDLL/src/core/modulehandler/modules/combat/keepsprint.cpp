@@ -1,12 +1,14 @@
 #include "keepsprint.h"
-#include "../../../core.h"
-#include "../../../utilities/jni_helpers.h"
+#include "../../../java/java.h"
+#include "../../../sdk/bridgeHelper.h"
 #include "../../../utilities/logger.h"
-#include <jni.h>
 
 KeepSprintModule::KeepSprintModule()
-    : ModuleBase("KeepSprint", "Prevents sprint reset on damage", Category::Combat)
+    : ModuleBase("KeepSprint", "Keep sprinting when hitting", Category::Combat)
 {
+    AddSetting<BooleanSetting>("KeepSprint", true);
+    AddSetting<NumberSetting>("Slowdown", 100.0f, 0.0f, 100.0f, 1.0f);
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void KeepSprintModule::OnEnable() { Logger::Log("KeepSprint enabled"); }
@@ -15,49 +17,43 @@ void KeepSprintModule::OnDisable() { Logger::Log("KeepSprint disabled"); }
 void KeepSprintModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
+    if (!BridgeHelper::Initialize(env)) return;
 
-    jobject mc = GetMinecraftObject(env);
-    if (!mc) return;
-    jobject player = GetPlayerObject(env, mc);
-    if (!player) { env->DeleteLocalRef(mc); return; }
+    jobject player = BridgeHelper::GetPlayer(env);
+    if (!player) return;
 
-    Java* java = Core::GetInstance().GetJava();
-    jclass entityClass = java->FindClass("pk", "net/minecraft/entity/Entity");
-    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
+    bool onGround = BridgeHelper::EntityBridge_IsOnGround
+        ? env->CallBooleanMethod(player, BridgeHelper::EntityBridge_IsOnGround) == JNI_TRUE : false;
+    if (!onGround) { env->DeleteLocalRef(player); return; }
 
-    jfieldID hurtFid = env->GetFieldID(entityClass, "W", "I");
-    if (!hurtFid) { env->ExceptionClear(); hurtFid = env->GetFieldID(entityClass, "hurtTime", "I"); }
-    env->ExceptionClear();
+    bool keepSprint = ((BooleanSetting*)FindSetting("KeepSprint"))->GetValue();
+    float slowPct = ((NumberSetting*)FindSetting("Slowdown"))->GetValue() / 100.0f;
 
-    if (hurtFid)
+    int hurtTime = BridgeHelper::ELBridge_GetHurtTime
+        ? env->CallIntMethod(player, BridgeHelper::ELBridge_GetHurtTime) : 0;
+    bool justHit = hurtTime > 0;
+
+    if (justHit)
     {
-        jint hurtTime = env->GetIntField(player, hurtFid);
-        if (hurtTime > 0)
+        if (keepSprint && BridgeHelper::EPSPBridge_SetSprinting)
+            env->CallVoidMethod(player, BridgeHelper::EPSPBridge_SetSprinting, JNI_TRUE);
+
+        if (slowPct < 1.0f && BridgeHelper::EntityBridge_GetMotionX && BridgeHelper::EntityBridge_SetMotionX &&
+            BridgeHelper::EntityBridge_GetMotionZ && BridgeHelper::EntityBridge_SetMotionZ)
         {
-            jmethodID isSprintMethod = env->GetMethodID(entityClass, "f", "()Z");
-            if (!isSprintMethod) { env->ExceptionClear(); isSprintMethod = env->GetMethodID(entityClass, "isSprinting", "()Z"); }
-            env->ExceptionClear();
-
-            if (isSprintMethod)
-            {
-                jboolean sprinting = env->CallBooleanMethod(player, isSprintMethod);
-                if (!sprinting)
-                {
-                    jmethodID setSprint = env->GetMethodID(entityClass, "b", "(Z)V");
-                    if (!setSprint) { env->ExceptionClear(); setSprint = env->GetMethodID(entityClass, "setSprinting", "(Z)V"); }
-                    env->ExceptionClear();
-
-                    if (setSprint)
-                        env->CallVoidMethod(player, setSprint, JNI_TRUE);
-                }
-            }
+            double mx = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetMotionX);
+            double mz = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetMotionZ);
+            env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionX, mx * slowPct);
+            env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionZ, mz * slowPct);
         }
     }
 
-    env->DeleteLocalRef(entityClass);
     env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mc);
 }

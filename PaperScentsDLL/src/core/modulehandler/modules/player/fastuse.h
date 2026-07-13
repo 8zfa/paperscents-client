@@ -16,4 +16,6 @@ private:
     jobject m_TimerObj = nullptr;
     bool m_Cached = false;
     float m_OriginalSpeed = 1.0f;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

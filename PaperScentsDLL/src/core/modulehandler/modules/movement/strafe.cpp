@@ -1,9 +1,7 @@
 #include "strafe.h"
-#include "../../../core.h"
+#include "../../../java/java.h"
+#include "../../../sdk/bridgeHelper.h"
 #include "../../../utilities/logger.h"
-#include "../../../utilities/jni_helpers.h"
-#include "../../../sdk/strayCache.h"
-#include <jni.h>
 #include <cmath>
 #include <Windows.h>
 
@@ -11,6 +9,7 @@ StrafeModule::StrafeModule()
     : ModuleBase("Strafe", "Perfect movement strafing", Category::Movement)
 {
     AddSetting<BooleanSetting>("AutoJump", true, "Automatically jump when strafing");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void StrafeModule::OnEnable() { Logger::Log("Strafe enabled"); }
@@ -19,46 +18,20 @@ void StrafeModule::OnDisable() { Logger::Log("Strafe disabled"); }
 void StrafeModule::OnUpdate()
 {
     if (!IsEnabled()) return;
-    JNIEnv* env = Java::GetThreadEnv();
-    if (!env) return;
-    env->ExceptionClear();
-
-    jobject mc = GetMinecraftObject(env);
-    if (!mc) return;
-    jobject player = GetPlayerObject(env, mc);
-    if (!player) { env->DeleteLocalRef(mc); return; }
-
-    jclass entityClass = StrayCache::Entity;
-    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
-
-    bool autoJump = ((BooleanSetting*)FindSetting("AutoJump"))->GetValue();
-
-    jfieldID motionXField = env->GetFieldID(entityClass, "v", "D");
-    if (!motionXField) { env->ExceptionClear(); motionXField = env->GetFieldID(entityClass, "motionX", "D"); }
-    env->ExceptionClear();
-
-    jfieldID motionYField = env->GetFieldID(entityClass, "w", "D");
-    if (!motionYField) { env->ExceptionClear(); motionYField = env->GetFieldID(entityClass, "motionY", "D"); }
-    env->ExceptionClear();
-
-    jfieldID motionZField = env->GetFieldID(entityClass, "x", "D");
-    if (!motionZField) { env->ExceptionClear(); motionZField = env->GetFieldID(entityClass, "motionZ", "D"); }
-    env->ExceptionClear();
-
-    jfieldID onGroundField = env->GetFieldID(entityClass, "C", "Z");
-    if (!onGroundField) { env->ExceptionClear(); onGroundField = env->GetFieldID(entityClass, "onGround", "Z"); }
-    env->ExceptionClear();
-
-    jfieldID yawField = env->GetFieldID(entityClass, "y", "F");
-    if (!yawField) { env->ExceptionClear(); yawField = env->GetFieldID(entityClass, "rotationYaw", "F"); }
-    env->ExceptionClear();
-
-    if (!motionXField || !motionYField || !motionZField || !onGroundField || !yawField)
-    {
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mc);
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
         return;
     }
+
+    JNIEnv* env = Java::GetThreadEnv();
+    if (!env) return;
+    if (!BridgeHelper::Initialize(env)) return;
+
+    jobject player = BridgeHelper::GetPlayer(env);
+    if (!player) return;
+
+    bool autoJump = ((BooleanSetting*)FindSetting("AutoJump"))->GetValue();
 
     bool forward = (GetAsyncKeyState('W') & 0x8000) != 0;
     bool backward = (GetAsyncKeyState('S') & 0x8000) != 0;
@@ -68,19 +41,18 @@ void StrafeModule::OnUpdate()
     int forwardV = (forward ? 1 : 0) - (backward ? 1 : 0);
     int strafeV = (right ? 1 : 0) - (left ? 1 : 0);
 
-    if (forwardV == 0 && strafeV == 0)
-    {
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mc);
-        return;
-    }
+    if (forwardV == 0 && strafeV == 0) { env->DeleteLocalRef(player); return; }
 
-    bool onGround = env->GetBooleanField(player, onGroundField);
-    double mx = env->GetDoubleField(player, motionXField);
-    double mz = env->GetDoubleField(player, motionZField);
+    bool onGround = BridgeHelper::EntityBridge_IsOnGround
+        ? env->CallBooleanMethod(player, BridgeHelper::EntityBridge_IsOnGround) == JNI_TRUE : false;
+
+    double mx = 0, mz = 0;
+    if (BridgeHelper::EntityBridge_GetMotionX) mx = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetMotionX);
+    if (BridgeHelper::EntityBridge_GetMotionZ) mz = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetMotionZ);
     double currentSpeed = std::sqrt(mx * mx + mz * mz);
 
-    float yaw = env->GetFloatField(player, yawField);
+    float yaw = 0;
+    if (BridgeHelper::EntityBridge_GetRotationYaw) yaw = (float)env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetRotationYaw);
     float rad = yaw * 0.017453292f;
     double sin = std::sin(rad);
     double cos = std::cos(rad);
@@ -93,13 +65,12 @@ void StrafeModule::OnUpdate()
     {
         targetX /= len;
         targetZ /= len;
-        env->SetDoubleField(player, motionXField, targetX * currentSpeed);
-        env->SetDoubleField(player, motionZField, targetZ * currentSpeed);
+        if (BridgeHelper::EntityBridge_SetMotionX) env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionX, targetX * currentSpeed);
+        if (BridgeHelper::EntityBridge_SetMotionZ) env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionZ, targetZ * currentSpeed);
     }
 
-    if (autoJump && onGround)
-        env->SetDoubleField(player, motionYField, 0.42);
+    if (autoJump && onGround && BridgeHelper::EntityBridge_SetMotionY)
+        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionY, 0.42);
 
     env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mc);
 }

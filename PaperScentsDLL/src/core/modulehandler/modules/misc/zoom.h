@@ -13,4 +13,6 @@ private:
     float m_OriginalFov = 90.0f;
     bool m_Cached = false;
     bool m_WasZooming = false;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

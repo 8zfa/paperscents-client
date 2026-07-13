@@ -72,6 +72,7 @@ LegitScaffoldModule::LegitScaffoldModule()
     AddSetting<NumberSetting>("RotationSpeed", 1.0f, 0.1f, 5.0f, 0.1f);
     AddSetting<BooleanSetting>("OnlyWhileSneaking", false);
     AddSetting<BooleanSetting>("TowerMode", false);
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
     m_LastPlace = std::chrono::steady_clock::now();
 }
 
@@ -81,6 +82,11 @@ void LegitScaffoldModule::OnDisable() { Logger::Log("LegitScaffold disabled"); }
 void LegitScaffoldModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
     if (Menu::GetInstance().IsOpen()) return;
 
     JNIEnv* env = GetEnv();

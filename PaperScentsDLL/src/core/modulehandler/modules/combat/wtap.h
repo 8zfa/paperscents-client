@@ -1,6 +1,6 @@
 #pragma once
 #include "../../modulebase.h"
-#include <chrono>
+#include <jni.h>
 
 class WTapModule : public ModuleBase
 {
@@ -11,13 +11,10 @@ public:
     void OnUpdate() override;
 
 private:
-    enum State { None, Waiting, Tapping };
-    State m_State = None;
-    std::chrono::steady_clock::time_point m_Timer;
-    long m_WaitMs = 0;
-    long m_TapMs = 0;
-    bool m_AttackedThisFrame = false;
-    bool m_WasForwardDown = false;
-    long m_Hits = 0;
-    long m_TargetHits = 0;
+    int m_DelayTicks = 0;
+    int m_DurationTicks = 0;
+    bool m_Active = false;
+    int m_PrevHurtTime = 0;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

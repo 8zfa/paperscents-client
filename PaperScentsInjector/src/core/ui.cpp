@@ -1,27 +1,27 @@
 #define NOMINMAX
+#define IMGUI_DEFINE_MATH_OPERATORS
 #include "ui.h"
 #include "core.h"
 #include "config.h"
 #include "logger.h"
 #include "process.h"
 #include <imgui.h>
-#include <imgui_internal.h>
 #include <string>
 #include <vector>
 #include <algorithm>
-#include <Commdlg.h>
+#include <thread>
 
 static std::vector<ProcessInfo> s_Processes;
 static std::vector<int> s_InjectedPIDs;
-static std::string s_SearchFilter;
 static std::string s_SelectedDllPath;
-static bool s_ScanRequested = true;
-static bool s_Injecting = false;
-static double s_LaunchTime = 0.0;
-static float s_LogScrollToBottom = 0.0f;
-static char s_SearchBuf[128] = "";
+static float s_StartTime = 0.0f;
 
-static void OpenFileDialog() {
+static float s_SlideProgress = 0.0f;
+static float s_ToggleAnim = 0.0f;
+static float s_LogProgress = 0.0f;
+
+static void OpenFileDialog()
+{
     OPENFILENAMEA ofn = {};
     char buf[MAX_PATH] = {};
     ofn.lStructSize = sizeof(ofn);
@@ -29,441 +29,559 @@ static void OpenFileDialog() {
     ofn.lpstrFile = buf;
     ofn.nMaxFile = sizeof(buf);
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_HIDEREADONLY;
-    if (GetOpenFileNameA(&ofn)) {
+    if (GetOpenFileNameA(&ofn))
+    {
         s_SelectedDllPath = buf;
         ConfigManager::Get().GetConfig().LastDllPath = buf;
         ConfigManager::Get().MarkDirty();
+        Logger::Get().Info("Selected DLL: " + s_SelectedDllPath);
     }
 }
 
-static void RenderTitleBar(float width) {
-    auto& cfg = ConfigManager::Get().GetConfig();
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 wPos = ImGui::GetWindowPos();
+static ImFont* Fallback(ImFont* f)
+{
+    return f ? f : ImGui::GetFont();
+}
 
-    // Title bar drag handling
+static float FontSize(ImFont* f)
+{
+    return f ? f->FontSize : ImGui::GetFontSize();
+}
+
+static bool GradientButton(const char* label, ImVec2 pos, ImVec2 size, ImU32 colorTop, ImU32 colorBot, float rounding, float alpha = 1.0f)
+{
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    bool hovered = ImGui::IsMouseHoveringRect(pos, pos + size);
+    bool held = ImGui::IsMouseDown(0) && hovered;
+
+    static float scaleAnim = 1.0f;
+    float dt = ImGui::GetIO().DeltaTime;
+    scaleAnim = hovered ? std::min(1.05f, scaleAnim + dt * 6.0f) : std::max(1.0f, scaleAnim - dt * 6.0f);
+
+    ImVec2 scl(size.x * scaleAnim, size.y * scaleAnim);
+    ImVec2 off((size.x - scl.x) * 0.5f, (size.y - scl.y) * 0.5f);
+    ImVec2 bp = pos + off;
+
+    ImGui::SetCursorScreenPos(pos);
+    ImGui::InvisibleButton(label, size);
+    bool clicked = ImGui::IsItemClicked();
+
+    ImVec4 cTop = ImGui::ColorConvertU32ToFloat4(colorTop);
+    ImVec4 cBot = ImGui::ColorConvertU32ToFloat4(colorBot);
+    cTop.w *= alpha;
+    cBot.w *= alpha;
+
+    if (held)
+    {
+        cTop = ImVec4(0.30f, 0.28f, 0.70f, alpha);
+        cBot = ImVec4(0.25f, 0.22f, 0.60f, alpha);
+    }
+    else if (hovered)
+    {
+        cTop.x = std::min(1.0f, cTop.x + 0.12f);
+        cTop.y = std::min(1.0f, cTop.y + 0.12f);
+        cTop.z = std::min(1.0f, cTop.z + 0.12f);
+        cBot.x = std::min(1.0f, cBot.x + 0.08f);
+        cBot.y = std::min(1.0f, cBot.y + 0.08f);
+        cBot.z = std::min(1.0f, cBot.z + 0.08f);
+    }
+
+    dl->AddRectFilled(bp, bp + scl, ImGui::ColorConvertFloat4ToU32(cTop), rounding);
+    dl->AddRect(bp, bp + scl, IM_COL32(255, 255, 255, (int)(30 * alpha)), rounding, 0, 1.0f);
+
+    ImVec2 textSize = ImGui::CalcTextSize(label);
+    ImVec2 textPos(bp.x + (scl.x - textSize.x) * 0.5f, bp.y + (scl.y - textSize.y) * 0.5f);
+    dl->AddText(textPos, IM_COL32(255, 255, 255, (int)(255 * alpha)), label);
+
+    return clicked;
+}
+
+static const char* StatusText()
+{
+    if (s_Processes.empty()) return "Ready";
+    for (auto& p : s_Processes)
+        if (p.Status == "Error") return "Error";
+    for (auto& p : s_Processes)
+        if (p.Status == "Injecting...") return "Injecting";
+    for (int ip : s_InjectedPIDs)
+    {
+        bool allInjected = true;
+        for (auto& p : s_Processes)
+        {
+            bool found = false;
+            for (int ip2 : s_InjectedPIDs) { if ((int)p.PID == ip2) { found = true; break; } }
+            if (!found) { allInjected = false; break; }
+        }
+        if (allInjected) return "Injected";
+    }
+    return "Ready";
+}
+
+static ImU32 StatusColor()
+{
+    std::string s = StatusText();
+    if (s == "Ready") return IM_COL32(0x4C, 0xAF, 0x50, 255);
+    if (s == "Injecting") return IM_COL32(0xFF, 0xA7, 0x26, 255);
+    if (s == "Error") return IM_COL32(0xE0, 0x40, 0x40, 255);
+    return IM_COL32(0x4C, 0xAF, 0x50, 255);
+}
+
+static std::string FriendlyName(const std::string& exe)
+{
+    std::string lower = exe;
+    std::transform(lower.begin(), lower.end(), lower.begin(), ::tolower);
+    if (lower == "javaw.exe") return "Minecraft 1.8.9";
+    return exe;
+}
+
+void RenderUI()
+{
+    auto& cfg = ConfigManager::Get().GetConfig();
+    float t = ImGui::GetTime();
+    float dt = ImGui::GetIO().DeltaTime;
+
+    if (s_StartTime == 0.0f)
+    {
+        s_StartTime = t;
+        if (!cfg.LastDllPath.empty()) s_SelectedDllPath = cfg.LastDllPath;
+    }
+
+    float fade = std::min(1.0f, (t - s_StartTime) / 0.30f);
+    ImGui::GetStyle().Alpha = fade;
+
+    float w = 580.0f;
+    float h = 440.0f;
+
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(w, h));
+
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+
+    static bool styleInit = false;
+    if (!styleInit)
+    {
+        ImGuiStyle& s = ImGui::GetStyle();
+        s.WindowRounding = 0.0f;
+        s.FrameRounding = 8.0f;
+        s.GrabRounding = 8.0f;
+        s.FramePadding = ImVec2(10, 8);
+        s.ItemSpacing = ImVec2(12, 10);
+        s.Colors[ImGuiCol_Button] = ImVec4(0.42f, 0.39f, 1.0f, 0.8f);
+        s.Colors[ImGuiCol_ButtonHovered] = ImVec4(0.48f, 0.45f, 1.0f, 1.0f);
+        s.Colors[ImGuiCol_ButtonActive] = ImVec4(0.35f, 0.32f, 0.8f, 1.0f);
+        s.Colors[ImGuiCol_Text] = ImVec4(1.0f, 1.0f, 1.0f, 1.0f);
+        s.Colors[ImGuiCol_TextDisabled] = ImVec4(0.6f, 0.6f, 0.6f, 1.0f);
+        s.Colors[ImGuiCol_FrameBg] = ImVec4(0.15f, 0.15f, 0.20f, 0.8f);
+        s.Colors[ImGuiCol_FrameBgHovered] = ImVec4(0.20f, 0.20f, 0.28f, 0.8f);
+        s.Colors[ImGuiCol_FrameBgActive] = ImVec4(0.10f, 0.10f, 0.15f, 0.8f);
+        s.Colors[ImGuiCol_CheckMark] = ImVec4(0.42f, 0.39f, 1.0f, 1.0f);
+        styleInit = true;
+    }
+
+    ImGui::Begin("##Main", nullptr,
+        ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoSavedSettings);
+
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 p0 = ImGui::GetWindowPos();
+    ImVec2 p1 = p0 + ImVec2(w, h);
+
+    dl->AddRectFilled(p0, p1, IM_COL32(0x0D, 0x0D, 0x0D, 245), 12.0f);
+    dl->AddRect(p0, p1, IM_COL32(0x3A, 0x3A, 0x4A, 255), 12.0f, 0, 1.5f);
+
     ImGui::SetCursorPos(ImVec2(0, 0));
-    ImGui::InvisibleButton("##title_bar_drag", ImVec2(width - 80, 40));
-    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left)) {
+    ImGui::InvisibleButton("##drag", ImVec2(w - 100, 60));
+    if (ImGui::IsItemActive() && ImGui::IsMouseDragging(ImGuiMouseButton_Left))
+    {
         ReleaseCapture();
         SendMessage(g_Window->GetHandle(), WM_NCLBUTTONDOWN, HTCAPTION, 0);
     }
 
-    dl->AddRectFilled(wPos, ImVec2(wPos.x + width, wPos.y + 40), IM_COL32(0x2D, 0x2D, 0x44, 255));
-    dl->AddRectFilledMultiColor(
-        ImVec2(wPos.x, wPos.y + 38), ImVec2(wPos.x + width, wPos.y + 40),
-        IM_COL32(0x6C, 0x63, 0xFF, 0), IM_COL32(0x6C, 0x63, 0xFF, 0),
-        IM_COL32(0x6C, 0x63, 0xFF, 80), IM_COL32(0x6C, 0x63, 0xFF, 80));
+    float cx = w * 0.5f;
 
-    if (g_Window && g_Window->FontTitle && g_Window->FontSmall) {
-        ImGui::PushFont(g_Window->FontTitle);
-        ImGui::SetCursorPos(ImVec2(14, 10));
-        ImGui::TextColored(ImVec4(0.42f, 0.39f, 1.0f, 1), "PaperScents");
+    // ── Branding (Top-Center) ──
+    IDirect3DTexture9* logoTexture = g_Window->GetUserLogoTexture();
+    if (logoTexture)
+    {
+        float logoW = (float)g_Window->GetUserLogoWidth();
+        float logoH = (float)g_Window->GetUserLogoHeight();
+        float aspect = logoW / logoH;
+        float targetH = 44.0f;
+        float targetW = targetH * aspect;
+        dl->AddImage((ImTextureID)logoTexture,
+            ImVec2(p0.x + cx - targetW * 0.5f, p0.y + 10),
+            ImVec2(p0.x + cx + targetW * 0.5f, p0.y + 10 + targetH));
+    }
+    else
+    {
+        ImFont* titleFont = Fallback(g_Window->FontTitle);
+        ImVec2 brandSize = titleFont->CalcTextSizeA(FontSize(g_Window->FontTitle), FLT_MAX, 0, "PaperScents");
+        dl->AddText(titleFont, FontSize(g_Window->FontTitle),
+            ImVec2(p0.x + cx - brandSize.x * 0.5f, p0.y + 10),
+            IM_COL32(0x6C, 0x63, 0xFF, 255), "PaperScents");
 
-        ImGui::SameLine(0, 4);
-        ImGui::PushFont(g_Window->FontSmall);
-        ImGui::TextColored(ImVec4(0.53f, 0.53f, 0.67f, 1), "injector");
-        ImGui::PopFont();
-        ImGui::PopFont();
+        ImFont* smallFont = Fallback(g_Window->FontSmall);
+        ImVec2 subSize = smallFont->CalcTextSizeA(FontSize(g_Window->FontSmall), FLT_MAX, 0, "injector");
+        dl->AddText(smallFont, FontSize(g_Window->FontSmall),
+            ImVec2(p0.x + cx - subSize.x * 0.5f, p0.y + 34),
+            IM_COL32(0x88, 0x88, 0xAA, 255), "injector");
     }
 
-    ImGui::SetCursorPos(ImVec2(width - 72, 6));
-    if (g_Window && g_Window->FontSmall) ImGui::PushFont(g_Window->FontSmall);
-
+    // ── Minimize & Close (Top-Right) ──
+    ImGui::SetCursorPos(ImVec2(w - 68, 14));
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.53f, 0.53f, 0.67f, 0.3f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.53f, 0.53f, 0.67f, 0.5f));
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4);
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.30f, 0.30f, 0.50f, 0.4f));
+    if (ImGui::Button("_", ImVec2(24, 24)))
+        ShowWindow(g_Window->GetHandle(), SW_MINIMIZE);
+    ImGui::PopStyleColor(2);
 
-    if (ImGui::Button(" _ ", ImVec2(28, 26))) {
-        ShowWindow(GetActiveWindow(), SW_MINIMIZE);
-    }
-    ImGui::SameLine(0, 2);
+    ImGui::SetCursorPos(ImVec2(w - 36, 14));
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.96f, 0.26f, 0.21f, 0.8f));
-    if (ImGui::Button(" X ", ImVec2(28, 26))) {
-        cfg.WindowX = (int)ImGui::GetWindowPos().x;
-        cfg.WindowY = (int)ImGui::GetWindowPos().y;
-        cfg.WindowW = (int)ImGui::GetWindowSize().x;
-        cfg.WindowH = (int)ImGui::GetWindowSize().y;
+    if (ImGui::Button("X", ImVec2(24, 24)))
+    {
+        cfg.WindowX = (int)p0.x;
+        cfg.WindowY = (int)p0.y;
         ConfigManager::Get().Save();
         PostQuitMessage(0);
     }
     ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar();
-    if (g_Window && g_Window->FontSmall) ImGui::PopFont();
-}
 
-static void RenderStatusBar(float width) {
-    auto& cfg = ConfigManager::Get().GetConfig();
-    float t = (float)ImGui::GetTime();
-    float pulse = (sinf(t * 2.0f) + 1.0f) * 0.5f;
-
-    ImU32 dotColor;
-    const char* statusText;
-    if (s_Injecting) {
-        dotColor = IM_COL32(0xFF, 0xA7, 0x26, 255);
-        statusText = "Injecting...";
-    } else if (s_Processes.empty()) {
-        dotColor = IM_COL32(0xE0, 0x40, 0x40, (int)(180 + 75 * pulse));
-        statusText = "No target";
-    } else if (s_InjectedPIDs.empty()) {
-        dotColor = IM_COL32(0x4C, 0xAF, 0x50, (int)(180 + 75 * pulse));
-        statusText = "Ready";
-    } else {
-        dotColor = IM_COL32(0x4C, 0xAF, 0x50, 255);
-        statusText = "Injected";
+    // ── Status Indicator (Top-Left) ──
+    float statusY = 22.0f;
+    ImU32 dotCol = StatusColor();
+    ImVec2 dotCenter(p0.x + 30.0f, p0.y + statusY + 10.0f);
+    std::string statusStr = StatusText();
+    if (statusStr == "Ready" || statusStr == "Injecting")
+    {
+        float dotPulse = (sinf(t * 4.0f) + 1.0f) * 0.5f;
+        ImU32 ringCol = IM_COL32((dotCol >> 16) & 0xFF, (dotCol >> 8) & 0xFF, dotCol & 0xFF, (int)(30 + dotPulse * 50));
+        dl->AddCircle(dotCenter, 4.0f + dotPulse * 4.0f, ringCol, 0, 1.5f);
+    }
+    dl->AddCircleFilled(dotCenter, 4.0f, dotCol);
+    {
+        ImFont* f = Fallback(g_Window->FontNormal);
+        dl->AddText(f, FontSize(g_Window->FontNormal),
+            ImVec2(p0.x + 44.0f, p0.y + statusY + 1.0f),
+            IM_COL32(180, 180, 200, 255), statusStr.c_str());
     }
 
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 wPos = ImGui::GetWindowPos();
+    // ── Slide Card Animation ──
+    bool hasProc = !s_Processes.empty();
+    if (hasProc)
+        s_SlideProgress = std::min(1.0f, s_SlideProgress + dt * 4.5f);
+    else
+        s_SlideProgress = std::max(0.0f, s_SlideProgress - dt * 4.5f);
 
-    ImVec2 dotCenter(wPos.x + 18, wPos.y + 18);
-    dl->AddCircleFilled(dotCenter, 5, dotColor);
-    dl->AddCircle(dotCenter, 8, IM_COL32(0x6C, 0x63, 0xFF, 60), 0, 2.0f);
+    float cardW = 420.0f;
+    float cardH = 130.0f;
+    float cardX = p0.x + (w - cardW) * 0.5f;
 
-    if (g_Window && g_Window->FontBold) ImGui::PushFont(g_Window->FontBold);
-    ImGui::SetCursorPos(ImVec2(32, 9));
-    ImGui::TextColored(ImVec4(0.92f, 0.92f, 0.92f, 1), statusText);
-    if (g_Window && g_Window->FontBold) ImGui::PopFont();
+    if (s_SlideProgress > 0.0f)
+    {
+        float cardY = p0.y + 90.0f + (1.0f - s_SlideProgress) * 40.0f;
+        ImU32 cardBg = IM_COL32(0x15, 0x15, 0x22, (int)(255 * s_SlideProgress));
+        ImU32 cardBorder = IM_COL32(0x2A, 0x2A, 0x3A, (int)(180 * s_SlideProgress));
 
-    ImGui::SetCursorPos(ImVec2(width - 156, 8));
-    ImGui::TextColored(ImVec4(0.53f, 0.53f, 0.67f, 1), "Auto-Inject");
+        dl->AddRectFilled(ImVec2(cardX, cardY), ImVec2(cardX + cardW, cardY + cardH), cardBg, 10.0f);
+        dl->AddRect(ImVec2(cardX, cardY), ImVec2(cardX + cardW, cardY + cardH), cardBorder, 10.0f, 0, 1.0f);
 
-    ImGui::SameLine(width - 76);
-    ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12);
-    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(0, 0));
-    ImVec2 toggleSize(48, 24);
-    ImGui::SetCursorPos(ImVec2(width - 70, 4));
+        ImVec2 iconC(cardX + 42, cardY + cardH * 0.5f);
+        dl->AddCircleFilled(iconC, 22, IM_COL32(0x6C, 0x63, 0xFF, (int)(30 * s_SlideProgress)), 0);
+        dl->AddCircle(iconC, 22, IM_COL32(0x6C, 0x63, 0xFF, (int)(80 * s_SlideProgress)), 0, 1.0f);
 
-    bool autoVal = cfg.AutoInject;
-    ImGui::PushStyleColor(ImGuiCol_FrameBg,
-        autoVal ? ImVec4(0.42f, 0.39f, 1.0f, 1) : ImVec4(0.27f, 0.27f, 0.40f, 1));
-    ImGui::PushStyleColor(ImGuiCol_FrameBgHovered,
-        autoVal ? ImVec4(0.48f, 0.45f, 1.0f, 1) : ImVec4(0.30f, 0.30f, 0.45f, 1));
-    if (ImGui::Checkbox("##autoinject", &autoVal)) {
-        cfg.AutoInject = autoVal;
-        ConfigManager::Get().MarkDirty();
-    }
-    ImGui::PopStyleColor(2);
-    ImGui::PopStyleVar(2);
-
-    ImGui::SameLine(width - 30);
-    if (ImGui::Button("Log", ImVec2(28, 24))) {
-        cfg.LogVisible = !cfg.LogVisible;
-        ConfigManager::Get().MarkDirty();
-    }
-}
-
-static void RenderProcessList(float width, float height) {
-    auto& cfg = ConfigManager::Get().GetConfig();
-    float t = (float)ImGui::GetTime();
-
-    ImGui::SetCursorPos(ImVec2(12, 12));
-    if (g_Window && g_Window->FontNormal) ImGui::PushFont(g_Window->FontNormal);
-    ImGui::SetNextItemWidth(width - 90);
-    if (ImGui::InputTextWithHint("##search", "Search processes...", s_SearchBuf, sizeof(s_SearchBuf),
-        ImGuiInputTextFlags_AutoSelectAll)) {
-        s_SearchFilter = s_SearchBuf;
-    }
-
-    ImGui::SameLine(0, 4);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.42f, 0.39f, 1.0f, 0.8f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.48f, 0.45f, 1.0f, 1));
-    if (ImGui::Button("Scan", ImVec2(56, 24))) {
-        s_ScanRequested = true;
-        Logger::Get().Info("Scanning for processes...");
-    }
-    ImGui::PopStyleColor(2);
-
-    ImGui::SetCursorPos(ImVec2(12, 42));
-    float listH = height - 56;
-    ImGui::BeginChild("ProcList", ImVec2(width - 24, listH), false,
-        ImGuiWindowFlags_NoScrollbar);
-
-    if (s_ScanRequested) {
-        s_ScanRequested = false;
-
-        auto fresh = ProcessManager::Scan();
-
-        // Keep only injected PIDs that still exist
-        std::vector<int> stillInjected;
-        for (int pid : s_InjectedPIDs) {
-            for (auto& p : fresh) {
-                if ((int)p.PID == pid) { stillInjected.push_back(pid); break; }
-            }
+        {
+            ImFont* f = Fallback(g_Window->FontNormal);
+            dl->AddText(f, FontSize(g_Window->FontNormal),
+                ImVec2(iconC.x - 9, iconC.y - 10),
+                IM_COL32(255, 255, 255, (int)(255 * s_SlideProgress)), "M");
         }
-        s_InjectedPIDs = stillInjected;
 
-        // Auto-inject into any new processes
-        if (cfg.AutoInject && !s_SelectedDllPath.empty()) {
-            for (auto& p : fresh) {
-                bool already = false;
-                for (int ip : s_InjectedPIDs) {
-                    if (ip == (int)p.PID) { already = true; break; }
-                }
-                if (!already) {
-                    std::string err;
-                    Logger::Get().Info("Auto-injecting: " + p.Name + " (PID:" + std::to_string(p.PID) + ")");
-                    if (ProcessManager::Inject(p.PID, s_SelectedDllPath, err)) {
-                        s_InjectedPIDs.push_back(p.PID);
-                        Logger::Get().Success("Injected PID " + std::to_string(p.PID));
-                    } else {
-                        Logger::Get().Error("Auto-inject failed PID " + std::to_string(p.PID) + ": " + err);
+        if (!s_Processes.empty())
+        {
+            auto& fp = s_Processes[0];
+            {
+                ImFont* f = Fallback(g_Window->FontNormal);
+                dl->AddText(f, FontSize(g_Window->FontNormal),
+                    ImVec2(cardX + 80, cardY + 22),
+                    IM_COL32(240, 240, 250, (int)(255 * s_SlideProgress)),
+                    FriendlyName(fp.Name).c_str());
+            }
+            {
+                ImFont* f = Fallback(g_Window->FontSmall);
+                std::string pidStr = "PID: " + std::to_string(fp.PID);
+                dl->AddText(f, FontSize(g_Window->FontSmall),
+                    ImVec2(cardX + 80, cardY + 48),
+                    IM_COL32(140, 140, 160, (int)(255 * s_SlideProgress)), pidStr.c_str());
+
+                std::string dllLabel = s_SelectedDllPath.empty() ? "No DLL selected" : s_SelectedDllPath;
+                if (dllLabel.length() > 42) dllLabel = "..." + dllLabel.substr(dllLabel.length() - 39);
+                dl->AddText(f, FontSize(g_Window->FontSmall),
+                    ImVec2(cardX + 80, cardY + 68),
+                    IM_COL32(100, 100, 120, (int)(255 * s_SlideProgress)), dllLabel.c_str());
+            }
+
+            float btnW = 120.0f;
+            float btnH = 32.0f;
+            float btnX = cardX + cardW - btnW - 20;
+            float btnY = cardY + cardH - btnH - 18;
+
+            bool alreadyInjected = false;
+            for (int ip : s_InjectedPIDs)
+                if (ip == (int)fp.PID) { alreadyInjected = true; break; }
+
+            if (alreadyInjected)
+            {
+                ImFont* f = Fallback(g_Window->FontBold);
+                dl->AddText(f, FontSize(g_Window->FontBold),
+                    ImVec2(btnX + 12, btnY + 6),
+                    IM_COL32(76, 175, 80, (int)(255 * s_SlideProgress)), "Injected");
+            }
+            else
+            {
+                if (GradientButton("Inject", ImVec2(btnX, btnY), ImVec2(btnW, btnH),
+                    IM_COL32(0x6C, 0x63, 0xFF, 255), IM_COL32(0x3F, 0x3D, 0x9E, 255), 8.0f, s_SlideProgress))
+                {
+                    if (s_SelectedDllPath.empty())
+                    {
+                        Logger::Get().Warning("No DLL selected.");
+                    }
+                    else
+                    {
+                        fp.Status = "Injecting...";
+                        DWORD pid = fp.PID;
+                        std::string dll = s_SelectedDllPath;
+                        Logger::Get().Info("Injecting into " + fp.Name + " (PID:" + std::to_string(pid) + ")");
+                        std::thread([pid, dll]() {
+                            std::string err;
+                            if (ProcessManager::Inject(pid, dll, err))
+                            {
+                                s_InjectedPIDs.push_back(pid);
+                                Logger::Get().Success("Injection succeeded!");
+                            }
+                            else
+                            {
+                                Logger::Get().Error(err);
+                            }
+                        }).detach();
                     }
                 }
             }
         }
-
-        s_Processes = std::move(fresh);
     }
 
-    ImDrawList* dl = ImGui::GetWindowDrawList();
-    ImVec2 wPos = ImGui::GetWindowPos();
-    ImVec2 cPos = ImGui::GetCursorScreenPos();
-    float rowH = 32;
-
-    std::string filter = s_SearchFilter;
-    std::transform(filter.begin(), filter.end(), filter.begin(), ::tolower);
-
-    int idx = 0;
-    for (auto& proc : s_Processes) {
-        std::string nameLower = proc.Name;
-        std::transform(nameLower.begin(), nameLower.end(), nameLower.begin(), ::tolower);
-        if (!filter.empty() && nameLower.find(filter) == std::string::npos) {
-            idx++;
-            continue;
+    if (s_SlideProgress < 1.0f)
+    {
+        float waitAlpha = 1.0f - s_SlideProgress;
+        float waitPulse = (sinf(t * 3.5f) + 1.0f) * 0.5f;
+        ImU32 waitCol = IM_COL32(150, 150, 170, (int)(waitAlpha * (120 + waitPulse * 135)));
+        {
+            ImFont* f = Fallback(g_Window->FontNormal);
+            ImVec2 ws = f->CalcTextSizeA(FontSize(g_Window->FontNormal), FLT_MAX, 0, "Waiting for Minecraft...");
+            dl->AddText(f, FontSize(g_Window->FontNormal),
+                ImVec2(p0.x + cx - ws.x * 0.5f, p0.y + 130.0f), waitCol, "Waiting for Minecraft...");
         }
-
-        bool isInjected = false;
-        for (int ip : s_InjectedPIDs) { if (ip == (int)proc.PID) { isInjected = true; break; } }
-
-        float slideOffset = (float)(1.0 - std::min(1.0, (t - s_LaunchTime - idx * 0.03) * 3.0));
-        float itemX = wPos.x + 12 + slideOffset * 60;
-
-        ImRect rowRect(itemX, cPos.y, itemX + width - 24, cPos.y + rowH);
-
-        bool hovered = ImGui::IsMouseHoveringRect(rowRect.Min, rowRect.Max);
-        if (hovered) {
-            dl->AddRectFilled(rowRect.Min, rowRect.Max, IM_COL32(0x6C, 0x63, 0xFF, 25), 6);
+        {
+            ImFont* f = Fallback(g_Window->FontSmall);
+            ImVec2 ss = f->CalcTextSizeA(FontSize(g_Window->FontSmall), FLT_MAX, 0, "Launch Lunar Client or vanilla to detect");
+            dl->AddText(f, FontSize(g_Window->FontSmall),
+                ImVec2(p0.x + cx - ss.x * 0.5f, p0.y + 155.0f),
+                IM_COL32(100, 100, 120, (int)(waitAlpha * 255)), "Launch Lunar Client or vanilla to detect");
         }
-
-        if (g_Window && g_Window->FontNormal) ImGui::PushFont(g_Window->FontNormal);
-        ImGui::SetCursorScreenPos(ImVec2(itemX + 10, cPos.y + 7));
-
-        ImU32 textColor = isInjected ? IM_COL32(0x4C, 0xAF, 0x50, 255) :
-            (hovered ? IM_COL32(0xEA, 0xEA, 0xEA, 255) : IM_COL32(0xBB, 0xBB, 0xCC, 255));
-        ImGui::TextColored(ImColor(textColor), "%s", proc.Name.c_str());
-
-        ImGui::SameLine(itemX + 280);
-        ImGui::TextColored(ImVec4(0.53f, 0.53f, 0.67f, 1), "PID: %lu", proc.PID);
-
-        ImGui::SameLine(itemX + 380);
-        if (isInjected) {
-            ImGui::TextColored(ImVec4(0.30f, 0.69f, 0.31f, 1), "Injected");
-        } else if (hovered && !s_Injecting) {
-            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.42f, 0.39f, 1.0f, 0.8f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.48f, 0.45f, 1.0f, 1));
-            if (ImGui::SmallButton("Inject")) {
-                if (!s_SelectedDllPath.empty()) {
-                    s_Injecting = true;
-                    std::string err;
-                    Logger::Get().Info("Injecting into " + proc.Name + " (PID:" + std::to_string(proc.PID) + ")");
-                    if (ProcessManager::Inject(proc.PID, s_SelectedDllPath, err)) {
-                        s_InjectedPIDs.push_back(proc.PID);
-                        Logger::Get().Success("Injected into PID " + std::to_string(proc.PID));
-                    } else {
-                        Logger::Get().Error("Injection failed: " + err);
-                    }
-                    s_Injecting = false;
-                } else {
-                    Logger::Get().Warning("No DLL selected.");
-                }
-            }
-            ImGui::PopStyleColor(2);
-        } else {
-            ImGui::TextColored(ImVec4(0.53f, 0.53f, 0.67f, 1), "Ready");
-        }
-
-        if (g_Window && g_Window->FontNormal) ImGui::PopFont();
-
-        cPos.y += rowH;
-        ImGui::SetCursorScreenPos(cPos);
-        idx++;
     }
 
-    ImGui::EndChild();
-}
+    // ── Controls: DLL Browse ──
+    float ctrlY = p0.y + 245.0f;
+    float browseW = 320.0f;
+    float browseH = 34.0f;
+    float browseX = p0.x + 30.0f;
 
-static void RenderBottomBar(float width) {
-    auto& cfg = ConfigManager::Get().GetConfig();
+    dl->AddRectFilled(ImVec2(browseX, ctrlY), ImVec2(browseX + browseW, ctrlY + browseH), IM_COL32(0x15, 0x15, 0x22, 255), 8.0f);
+    dl->AddRect(ImVec2(browseX, ctrlY), ImVec2(browseX + browseW, ctrlY + browseH), IM_COL32(0x2A, 0x2A, 0x3A, 255), 8.0f, 0, 1.0f);
 
-    ImGui::SetCursorPos(ImVec2(12, 8));
+    std::string dllText = s_SelectedDllPath.empty() ? "Select client DLL..." : s_SelectedDllPath;
+    if (dllText.length() > 38) dllText = "..." + dllText.substr(dllText.length() - 35);
+    ImU32 dllCol = s_SelectedDllPath.empty() ? IM_COL32(90, 90, 110, 255) : IM_COL32(200, 200, 210, 255);
 
-    if (g_Window && g_Window->FontSmall) ImGui::PushFont(g_Window->FontSmall);
-    std::string dllLabel = s_SelectedDllPath.empty() ? "No DLL selected" : s_SelectedDllPath;
-    if (dllLabel.length() > 50) dllLabel = "..." + dllLabel.substr(dllLabel.length() - 47);
-    ImGui::TextColored(ImVec4(0.53f, 0.53f, 0.67f, 1), "%s", dllLabel.c_str());
-    if (g_Window && g_Window->FontSmall) ImGui::PopFont();
+    {
+        ImFont* f = Fallback(g_Window->FontSmall);
+        dl->AddText(f, FontSize(g_Window->FontSmall),
+            ImVec2(browseX + 14.0f, ctrlY + 10.0f), dllCol, dllText.c_str());
+    }
 
-    ImGui::SameLine(width - 180);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.27f, 0.27f, 0.44f, 1));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.33f, 0.33f, 0.53f, 1));
-    if (ImGui::Button("Select DLL", ImVec2(78, 28))) {
+    ImGui::SetCursorScreenPos(ImVec2(browseX, ctrlY));
+    if (ImGui::InvisibleButton("##browseBox", ImVec2(browseW, browseH)))
         OpenFileDialog();
-        if (!s_SelectedDllPath.empty())
-            Logger::Get().Info("Selected DLL: " + s_SelectedDllPath);
+
+    float browseBtnX = browseX + browseW + 10.0f;
+    if (GradientButton("Browse", ImVec2(browseBtnX, ctrlY), ImVec2(90.0f, browseH),
+        IM_COL32(0x2E, 0x2E, 0x3F, 255), IM_COL32(0x20, 0x20, 0x2F, 255), 8.0f, 1.0f))
+    {
+        OpenFileDialog();
     }
-    ImGui::PopStyleColor(2);
 
-    ImGui::SameLine(width - 96);
-    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.42f, 0.39f, 1.0f, 1));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.48f, 0.45f, 1.0f, 1));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.35f, 0.32f, 0.85f, 1));
-    if (ImGui::Button("Inject All", ImVec2(78, 28))) {
-        if (s_SelectedDllPath.empty()) {
-            Logger::Get().Warning("No DLL selected.");
-        } else {
-            s_Injecting = true;
-            for (auto& p : s_Processes) {
-                bool already = false;
-                for (int ip : s_InjectedPIDs) { if (ip == (int)p.PID) { already = true; break; } }
-                if (already) continue;
-                std::string err;
-                if (ProcessManager::Inject(p.PID, s_SelectedDllPath, err)) {
-                    s_InjectedPIDs.push_back(p.PID);
-                    Logger::Get().Success("Injected into " + p.Name + " (PID:" + std::to_string(p.PID) + ")");
-                } else {
-                    Logger::Get().Error("Failed " + p.Name + ": " + err);
-                }
-            }
-            s_Injecting = false;
-        }
+    // ── Auto-Inject Toggle ──
+    float toggleY = p0.y + 295.0f;
+    float toggleX = p0.x + 30.0f;
+    float toggleW = 38.0f;
+    float toggleH = 20.0f;
+
+    ImGui::SetCursorScreenPos(ImVec2(toggleX, toggleY));
+    if (ImGui::InvisibleButton("##toggle", ImVec2(toggleW, toggleH)))
+    {
+        cfg.AutoInject = !cfg.AutoInject;
+        ConfigManager::Get().MarkDirty();
     }
-    ImGui::PopStyleColor(3);
-}
 
-static void RenderLogWindow() {
-    auto& cfg = ConfigManager::Get().GetConfig();
-    if (!cfg.LogVisible) return;
+    if (cfg.AutoInject)
+        s_ToggleAnim = std::min(1.0f, s_ToggleAnim + dt * 8.0f);
+    else
+        s_ToggleAnim = std::max(0.0f, s_ToggleAnim - dt * 8.0f);
 
-    ImGui::SetNextWindowSize(ImVec2(580, 160), ImGuiCond_FirstUseEver);
-    ImGui::SetNextWindowPos(ImVec2(
-        (float)cfg.WindowX + 10, (float)cfg.WindowY + (float)cfg.WindowH - 170), ImGuiCond_FirstUseEver);
+    ImVec4 bgOff(0.12f, 0.12f, 0.18f, 1.0f);
+    ImVec4 bgOn(0.42f, 0.39f, 1.0f, 1.0f);
+    ImVec4 bgCur(
+        bgOff.x + (bgOn.x - bgOff.x) * s_ToggleAnim,
+        bgOff.y + (bgOn.y - bgOff.y) * s_ToggleAnim,
+        bgOff.z + (bgOn.z - bgOff.z) * s_ToggleAnim,
+        1.0f
+    );
+    dl->AddRectFilled(ImVec2(toggleX, toggleY), ImVec2(toggleX + toggleW, toggleY + toggleH),
+        ImGui::ColorConvertFloat4ToU32(bgCur), 10.0f);
+    dl->AddRect(ImVec2(toggleX, toggleY), ImVec2(toggleX + toggleW, toggleY + toggleH),
+        IM_COL32(255, 255, 255, 20), 10.0f);
 
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.10f, 0.10f, 0.18f, 0.95f));
-    ImGui::PushStyleColor(ImGuiCol_TitleBg, ImVec4(0.18f, 0.18f, 0.27f, 1));
-    ImGui::PushStyleColor(ImGuiCol_TitleBgActive, ImVec4(0.18f, 0.18f, 0.27f, 1));
+    float thumbX = toggleX + 10.0f + s_ToggleAnim * 18.0f;
+    dl->AddCircleFilled(ImVec2(thumbX, toggleY + 10.0f), 8.0f, IM_COL32(255, 255, 255, 255));
 
-    if (ImGui::Begin("Log", &cfg.LogVisible, ImGuiWindowFlags_NoCollapse)) {
+    {
+        ImFont* f = Fallback(g_Window->FontNormal);
+        dl->AddText(f, FontSize(g_Window->FontNormal),
+            ImVec2(toggleX + 48.0f, toggleY + 1.0f),
+            IM_COL32(150, 150, 170, 255), "Auto-Inject");
+    }
+
+    // ── Log Panel ──
+    if (cfg.LogVisible)
+        s_LogProgress = std::min(1.0f, s_LogProgress + dt * 5.0f);
+    else
+        s_LogProgress = std::max(0.0f, s_LogProgress - dt * 5.0f);
+
+    float logMaxH = 150.0f;
+    float logH = s_LogProgress * logMaxH;
+    float sheetY = p1.y - logH - 45.0f;
+
+    if (s_LogProgress > 0.0f)
+    {
+        dl->AddRectFilled(ImVec2(p0.x, sheetY), ImVec2(p1.x, p1.y - 45.0f), IM_COL32(0x0A, 0x0A, 0x0F, 245));
+        dl->AddLine(ImVec2(p0.x, sheetY), ImVec2(p1.x, sheetY), IM_COL32(0x20, 0x20, 0x30, 255), 1.0f);
+
+        ImGui::SetCursorScreenPos(ImVec2(p0.x + 15.0f, sheetY + 10.0f));
+        ImGui::BeginChild("##logScroll", ImVec2(w - 30.0f, logH - 15.0f), false, ImGuiWindowFlags_AlwaysVerticalScrollbar);
+        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 3));
+
         auto& entries = Logger::Get().GetEntries();
-
-        ImGui::BeginChild("LogScroll", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar);
-        ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4, 2));
-
-        for (size_t i = 0; i < entries.size(); i++) {
-            auto& e = entries[i];
+        for (auto& e : entries)
+        {
             const char* label = "";
-            ImVec4 color;
-            switch (e.Level) {
-            case LogInfo:    label = "[INFO]";    color = ImVec4(0.53f, 0.53f, 0.67f, 1); break;
-            case LogSuccess: label = "[OK]";      color = ImVec4(0.30f, 0.69f, 0.31f, 1); break;
-            case LogWarning: label = "[WARN]";    color = ImVec4(1.00f, 0.65f, 0.15f, 1); break;
-            case LogError:   label = "[ERR]";     color = ImVec4(0.96f, 0.26f, 0.21f, 1); break;
+            ImU32 col;
+            switch (e.Level)
+            {
+            case LogInfo:    label = "[i]"; col = IM_COL32(0x88, 0x88, 0xAA, 255); break;
+            case LogSuccess: label = "[+]"; col = IM_COL32(0x4C, 0xAF, 0x50, 255); break;
+            case LogWarning: label = "[!]"; col = IM_COL32(0xFF, 0xA7, 0x26, 255); break;
+            case LogError:   label = "[x]"; col = IM_COL32(0xE0, 0x40, 0x40, 255); break;
             }
-            ImGui::TextColored(color, "%s", label);
-            ImGui::SameLine();
+            ImDrawList* ldl = ImGui::GetWindowDrawList();
+            ImVec2 lpos = ImGui::GetCursorScreenPos();
+            ldl->AddText(lpos, col, label);
+            ImGui::SameLine(22.0f);
             ImGui::TextUnformatted(e.Message.c_str());
         }
 
-        if (s_LogScrollToBottom > 0) {
+        if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 10.0f)
             ImGui::SetScrollHereY(1.0f);
-            s_LogScrollToBottom -= 0.01f;
-            if (s_LogScrollToBottom < 0) s_LogScrollToBottom = 0;
-        }
 
         ImGui::PopStyleVar();
         ImGui::EndChild();
     }
-    ImGui::End();
-    ImGui::PopStyleColor(3);
-}
 
-void RenderUI() {
-    auto& cfg = ConfigManager::Get().GetConfig();
-    float t = (float)ImGui::GetTime();
+    // ── Bottom Bar ──
+    float bottomBarY = p1.y - 45.0f;
+    dl->AddRectFilled(ImVec2(p0.x, bottomBarY), p1, IM_COL32(0x0A, 0x0A, 0x0F, 255), 12.0f, ImDrawFlags_RoundCornersBottom);
+    dl->AddLine(ImVec2(p0.x, bottomBarY), ImVec2(p1.x, bottomBarY), IM_COL32(0x20, 0x20, 0x30, 255), 1.0f);
 
-    if (s_LaunchTime == 0.0) {
-        s_LaunchTime = t;
-        if (!cfg.LastDllPath.empty()) {
-            s_SelectedDllPath = cfg.LastDllPath;
-        }
-    }
-
-    float fadeAlpha = (float)std::min(1.0, (t - s_LaunchTime) * 3.0);
-    if (fadeAlpha > 0.999f) fadeAlpha = 1.0f;
-
-    ImGui::GetStyle().Alpha = fadeAlpha;
-
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.10f, 0.10f, 0.18f, 0));
-    ImGui::PushStyleColor(ImGuiCol_Border, ImVec4(0.27f, 0.27f, 0.40f, 1));
-
-    ImGui::SetNextWindowPos(ImVec2(0, 0));
-    ImGui::SetNextWindowSize(ImVec2((float)cfg.WindowW, (float)cfg.WindowH));
-
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0);
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 1);
-
-    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar |
-        ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
-        ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoScrollbar;
-
-    if (ImGui::Begin("MainWindow", nullptr, flags)) {
-        float w = ImGui::GetWindowWidth();
-        float h = ImGui::GetWindowHeight();
-
-        RenderTitleBar(w);
-
-        ImGui::SetCursorPos(ImVec2(0, 44));
-        ImGui::BeginChild("StatusBar", ImVec2(w, 32), false, ImGuiWindowFlags_NoScrollbar);
-        RenderStatusBar(w);
-        ImGui::EndChild();
-
-        ImGui::SetCursorPos(ImVec2(0, 80));
-        float midH = h - 144;
-        ImGui::BeginChild("MidSection", ImVec2(w, midH), false, ImGuiWindowFlags_NoScrollbar);
-        RenderProcessList(w, midH);
-        ImGui::EndChild();
-
-        ImGui::SetCursorPos(ImVec2(0, h - 56));
-        ImGui::BeginChild("BottomBar", ImVec2(w, 56), false, ImGuiWindowFlags_NoScrollbar);
-        RenderBottomBar(w);
-        ImGui::EndChild();
-    }
-    ImGui::End();
-
-    ImGui::PopStyleVar(3);
-    ImGui::PopStyleColor(2);
-
-    RenderLogWindow();
-
-    static double lastPerScan = 0;
-    double scanInterval = cfg.AutoInject ? 2.0 : 3.0;
-    if (t - lastPerScan > scanInterval) {
-        s_ScanRequested = true;
-        lastPerScan = t;
-    }
-
-    if (ConfigManager::Get().GetConfig().AutoInject != cfg.AutoInject) {
+    ImGui::SetCursorScreenPos(ImVec2(p0.x, bottomBarY));
+    if (ImGui::InvisibleButton("##logHeader", ImVec2(w, 45.0f)))
+    {
+        cfg.LogVisible = !cfg.LogVisible;
         ConfigManager::Get().MarkDirty();
     }
 
+    {
+        ImFont* f = Fallback(g_Window->FontNormal);
+        float textLogY = bottomBarY + 12.0f;
+        dl->AddText(f, FontSize(g_Window->FontNormal),
+            ImVec2(p0.x + 24.0f, textLogY), IM_COL32(140, 140, 160, 255), "Activity Log");
+        const char* arrow = cfg.LogVisible ? "v" : ">";
+        dl->AddText(f, FontSize(g_Window->FontNormal),
+            ImVec2(p0.x + 115.0f, textLogY + 1.0f), IM_COL32(100, 100, 120, 255), arrow);
+
+        auto& entries = Logger::Get().GetEntries();
+        std::string lastMsg = entries.empty() ? "System ready." : entries.back().Message;
+        if (lastMsg.length() > 50) lastMsg = lastMsg.substr(0, 47) + "...";
+        dl->AddText(f, FontSize(g_Window->FontNormal),
+            ImVec2(p0.x + 140.0f, textLogY), IM_COL32(90, 90, 110, 255), lastMsg.c_str());
+    }
+
+    ImGui::End();
+    ImGui::PopStyleVar(3);
+
+    // ── Background Scan ──
+    static double lastScan = 0;
+    double interval = s_Processes.empty() ? 1.0 : 2.0;
+    if (t - lastScan > interval)
+    {
+        lastScan = t;
+        std::thread([]() {
+            auto fresh = ProcessManager::Scan();
+            std::vector<int> stillInjected;
+            for (int pid : s_InjectedPIDs)
+                for (auto& p : fresh)
+                    if ((int)p.PID == pid) { stillInjected.push_back(pid); break; }
+            s_InjectedPIDs = stillInjected;
+
+            auto& cfg = ConfigManager::Get().GetConfig();
+            if (cfg.AutoInject && !s_SelectedDllPath.empty())
+            {
+                for (auto& p : fresh)
+                {
+                    bool already = false;
+                    for (int ip : s_InjectedPIDs) { if (ip == (int)p.PID) { already = true; break; } }
+                    if (!already)
+                    {
+                        std::string err;
+                        if (ProcessManager::Inject(p.PID, s_SelectedDllPath, err))
+                        {
+                            s_InjectedPIDs.push_back(p.PID);
+                            Logger::Get().Success("Injection succeeded!");
+                        }
+                        else
+                            Logger::Get().Error(err);
+                    }
+                }
+            }
+            s_Processes = std::move(fresh);
+        }).detach();
+    }
+
+    // ── Periodic Save ──
     static double lastSave = 0;
-    if (t - lastSave > 5.0) {
-        cfg.WindowX = (int)ImGui::GetWindowPos().x;
-        cfg.WindowY = (int)ImGui::GetWindowPos().y;
-        cfg.WindowW = (int)ImGui::GetWindowSize().x;
-        cfg.WindowH = (int)ImGui::GetWindowSize().y;
+    if (t - lastSave > 5.0)
+    {
         ConfigManager::Get().Save();
         lastSave = t;
     }

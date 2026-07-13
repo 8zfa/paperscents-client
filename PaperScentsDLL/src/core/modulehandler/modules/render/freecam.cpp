@@ -9,6 +9,7 @@ FreeCamModule::FreeCamModule()
     : ModuleBase("FreeCam", "Detach camera from body", Category::Render)
 {
     AddSetting<NumberSetting>("Speed", 1.0f, 0.1f, 5.0f, 0.1f);
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void FreeCamModule::OnEnable()
@@ -116,6 +117,11 @@ void FreeCamModule::OnDisable()
 void FreeCamModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

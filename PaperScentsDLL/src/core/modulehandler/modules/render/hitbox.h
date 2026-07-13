@@ -11,4 +11,5 @@ public:
 
 private:
     int m_FrameCounter = 0;
+    int m_UpdateInterval = 3;
 };

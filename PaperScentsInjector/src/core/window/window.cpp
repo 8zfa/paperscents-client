@@ -1,7 +1,11 @@
+#define NOMINMAX
 #include "window.h"
 #include "core/config.h"
 #include "core/ui.h"
 #include "core/logger.h"
+#include <windowsx.h>
+#include <gdiplus.h>
+#pragma comment(lib, "gdiplus.lib")
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
@@ -16,15 +20,6 @@ LRESULT CALLBACK Window::WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     {
     case WM_ERASEBKGND:
         return 1;
-    case WM_SIZE:
-        if (wParam == SIZE_MINIMIZED || !self)
-            return 0;
-        self->m_Width = (int)LOWORD(lParam);
-        self->m_Height = (int)HIWORD(lParam);
-        self->m_D3dpp.BackBufferWidth = (UINT)self->m_Width;
-        self->m_D3dpp.BackBufferHeight = (UINT)self->m_Height;
-        self->m_DeviceLost = true;
-        return 0;
     case WM_DESTROY:
         PostQuitMessage(0);
         return 0;
@@ -76,21 +71,6 @@ bool Window::Create(HINSTANCE hInstance, const WindowConfig& config)
     return true;
 }
 
-static const char* HResultToString(HRESULT hr)
-{
-    switch (hr)
-    {
-    case D3DERR_DEVICELOST: return "D3DERR_DEVICELOST";
-    case D3DERR_INVALIDCALL: return "D3DERR_INVALIDCALL";
-    case D3DERR_NOTAVAILABLE: return "D3DERR_NOTAVAILABLE";
-    case D3DERR_OUTOFVIDEOMEMORY: return "D3DERR_OUTOFVIDEOMEMORY";
-    case D3DERR_DRIVERINTERNALERROR: return "D3DERR_DRIVERINTERNALERROR";
-    case E_OUTOFMEMORY: return "E_OUTOFMEMORY";
-    case D3DERR_DEVICENOTRESET: return "D3DERR_DEVICENOTRESET";
-    default: return "UNKNOWN";
-    }
-}
-
 bool Window::CreateDeviceD3D()
 {
     m_D3D = Direct3DCreate9(D3D_SDK_VERSION);
@@ -100,15 +80,10 @@ bool Window::CreateDeviceD3D()
         return false;
     }
 
-    // backbuffer formats to try (in order of preference)
     D3DFORMAT bbFormats[] = {
-        D3DFMT_X8R8G8B8,
-        D3DFMT_A8R8G8B8,
-        D3DFMT_R5G6B5,
-        D3DFMT_UNKNOWN
+        D3DFMT_X8R8G8B8, D3DFMT_A8R8G8B8, D3DFMT_R5G6B5, D3DFMT_UNKNOWN
     };
 
-    // depth/stencil formats to try (empty entry means no depth)
     struct DepthOption { bool enable; D3DFORMAT fmt; };
     DepthOption depthOpts[] = {
         { true,  D3DFMT_D24S8 },
@@ -117,25 +92,20 @@ bool Window::CreateDeviceD3D()
         { false, D3DFMT_UNKNOWN }
     };
 
-    // present intervals
     DWORD intervals[] = {
         D3DPRESENT_INTERVAL_ONE,
         D3DPRESENT_INTERVAL_IMMEDIATE,
         D3DPRESENT_INTERVAL_DEFAULT
     };
 
-    // vertex processing modes
     DWORD vpModes[] = {
         D3DCREATE_MIXED_VERTEXPROCESSING,
         D3DCREATE_SOFTWARE_VERTEXPROCESSING,
         D3DCREATE_HARDWARE_VERTEXPROCESSING
     };
 
-    // device types
     D3DDEVTYPE devTypes[] = {
-        D3DDEVTYPE_HAL,
-        D3DDEVTYPE_SW,
-        D3DDEVTYPE_REF
+        D3DDEVTYPE_HAL, D3DDEVTYPE_SW, D3DDEVTYPE_REF
     };
 
     UINT adapterCount = m_D3D->GetAdapterCount();
@@ -148,12 +118,9 @@ bool Window::CreateDeviceD3D()
 
         for (auto& devType : devTypes)
         {
-            // Skip SW/REF unless HAL failed on all previous adapters
             if (devType == D3DDEVTYPE_SW || devType == D3DDEVTYPE_REF)
-            {
                 if (adapter < adapterCount - 1)
-                    continue; // only try SW/REF on the last adapter
-            }
+                    continue;
 
             for (auto& vp : vpModes)
             {
@@ -180,11 +147,6 @@ bool Window::CreateDeviceD3D()
 
                             if (SUCCEEDED(hr))
                             {
-                                char buf[256];
-                                sprintf_s(buf, "D3D9 device created: adapter=%u (%hs) devType=%d vp=0x%X bbFmt=%d depth=%d/%d interval=%d",
-                                    adapter, adapterId.Description, (int)devType, vp,
-                                    (int)bbFmt, depth.enable, depth.enable ? (int)depth.fmt : -1, interval);
-                                Logger::Get().Info(buf);
                                 m_D3dpp = pp;
                                 return true;
                             }
@@ -195,7 +157,6 @@ bool Window::CreateDeviceD3D()
         }
     }
 
-    Logger::Get().Error("All D3D9 device creation combinations exhausted.");
     return false;
 }
 
@@ -208,8 +169,72 @@ void Window::ResetDevice()
     ImGui_ImplDX9_CreateDeviceObjects();
 }
 
+bool Window::LoadTextureFromFile(const char* filename, LPDIRECT3DTEXTURE9* out_texture, int* out_width, int* out_height)
+{
+    wchar_t wFilename[MAX_PATH];
+    size_t converted = 0;
+    mbstowcs_s(&converted, wFilename, filename, _TRUNCATE);
+
+    Gdiplus::Bitmap bmp(wFilename);
+    if (bmp.GetLastStatus() != Gdiplus::Ok)
+        return false;
+
+    int w = bmp.GetWidth();
+    int h = bmp.GetHeight();
+
+    Gdiplus::Rect rect(0, 0, w, h);
+    Gdiplus::BitmapData bd;
+    if (bmp.LockBits(&rect, Gdiplus::ImageLockModeRead, PixelFormat32bppARGB, &bd) != Gdiplus::Ok)
+        return false;
+
+    LPDIRECT3DTEXTURE9 texture = nullptr;
+    if (FAILED(m_Device->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &texture, nullptr)))
+    {
+        bmp.UnlockBits(&bd);
+        return false;
+    }
+
+    D3DLOCKED_RECT locked;
+    if (SUCCEEDED(texture->LockRect(0, &locked, nullptr, 0)))
+    {
+        const unsigned char* src = (const unsigned char*)bd.Scan0;
+        unsigned char* dst = (unsigned char*)locked.pBits;
+        for (int y = 0; y < h; ++y)
+        {
+            memcpy(dst + y * locked.Pitch, src + y * bd.Stride, w * 4);
+        }
+        texture->UnlockRect(0);
+    }
+
+    bmp.UnlockBits(&bd);
+
+    *out_texture = texture;
+    *out_width = w;
+    *out_height = h;
+    return true;
+}
+
+static ImFont* TryLoadFont(ImFontAtlas* atlas, const char* name, float size)
+{
+    const char* paths[] = {
+        name,
+        ("ext\\fonts\\" + std::string(name)).c_str(),
+        ("..\\ext\\fonts\\" + std::string(name)).c_str(),
+        ("C:\\PaperScents\\ext\\fonts\\" + std::string(name)).c_str()
+    };
+    for (const char* path : paths)
+    {
+        ImFont* f = atlas->AddFontFromFileTTF(path, size);
+        if (f) return f;
+    }
+    return atlas->AddFontDefault();
+}
+
 void Window::SetupImGui()
 {
+    Gdiplus::GdiplusStartupInput gsi;
+    Gdiplus::GdiplusStartup(&m_GdiplusToken, &gsi, nullptr);
+
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -217,13 +242,23 @@ void Window::SetupImGui()
 
     ImGui::StyleColorsDark();
 
-    FontTitle = io.Fonts->AddFontFromFileTTF("ext\\fonts\\Roboto-Bold.ttf", 20.0f);
-    FontNormal = io.Fonts->AddFontFromFileTTF("ext\\fonts\\Roboto-Medium.ttf", 16.0f);
-    FontSmall = io.Fonts->AddFontFromFileTTF("ext\\fonts\\Roboto-Regular.ttf", 13.0f);
-    FontBold = io.Fonts->AddFontFromFileTTF("ext\\fonts\\Roboto-Bold.ttf", 16.0f);
+    FontTitle = TryLoadFont(io.Fonts, "Roboto-Bold.ttf", 22.0f);
+    FontNormal = TryLoadFont(io.Fonts, "Roboto-Medium.ttf", 15.0f);
+    FontSmall = TryLoadFont(io.Fonts, "Roboto-Regular.ttf", 13.0f);
+    FontBold = TryLoadFont(io.Fonts, "Roboto-Bold.ttf", 15.0f);
 
     ImGui_ImplWin32_Init(m_Hwnd);
     ImGui_ImplDX9_Init(m_Device);
+
+    const char* logoPaths[] = { "logo.png", "ext\\logo.png", "..\\ext\\logo.png", "C:\\PaperScents\\ext\\logo.png" };
+    for(const char* path : logoPaths)
+    {
+        if (LoadTextureFromFile(path, &m_UserLogoTexture, &m_UserLogoWidth, &m_UserLogoHeight))
+        {
+            Logger::Get().Info(std::string("Loaded logo: ") + path);
+            break;
+        }
+    }
 }
 
 void Window::Render()
@@ -239,7 +274,7 @@ void Window::Render()
         m_DeviceLost = false;
     }
 
-    m_Device->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(26, 26, 46), 1.0f, 0);
+    m_Device->Clear(0, nullptr, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(13, 13, 13), 1.0f, 0);
     if (m_Device->BeginScene() == D3D_OK)
     {
         ImGui_ImplDX9_NewFrame();
@@ -263,6 +298,15 @@ void Window::Destroy()
     ImGui_ImplDX9_Shutdown();
     ImGui_ImplWin32_Shutdown();
     ImGui::DestroyContext();
+
+    if (m_UserLogoTexture)
+    {
+        m_UserLogoTexture->Release();
+        m_UserLogoTexture = nullptr;
+    }
+
+    if (m_GdiplusToken)
+        Gdiplus::GdiplusShutdown(m_GdiplusToken);
 
     if (m_Device)
     {

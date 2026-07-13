@@ -6,6 +6,7 @@ FastMineModule::FastMineModule()
     : ModuleBase("FastMine", "Break blocks faster", Category::Player)
 {
     AddSetting<NumberSetting>("Speed", 1.5f, 1.0f, 3.0f, 0.1f, "Block break speed multiplier");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void FastMineModule::OnEnable() { Logger::Log("FastMine enabled"); }
@@ -14,6 +15,11 @@ void FastMineModule::OnDisable() { Logger::Log("FastMine disabled"); }
 void FastMineModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;

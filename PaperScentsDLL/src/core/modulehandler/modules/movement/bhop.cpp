@@ -1,9 +1,8 @@
 #include "bhop.h"
-#include "../../../core.h"
-#include "../../../utilities/logger.h"
-#include "../../../utilities/jni_helpers.h"
+#include "../../../java/java.h"
 #include "../../../sdk/strayCache.h"
-#include <jni.h>
+#include "../../../sdk/bridgeHelper.h"
+#include "../../../utilities/logger.h"
 #include <cmath>
 #include <Windows.h>
 
@@ -11,145 +10,109 @@ BHopModule::BHopModule()
     : ModuleBase("BHop", "Bunny hop for speed", Category::Movement)
 {
     AddSetting<NumberSetting>("Speed", 1.0f, 0.1f, 5.0f, 0.1f, "Speed multiplier");
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void BHopModule::OnEnable() { Logger::Log("BHop enabled"); }
+
 void BHopModule::OnDisable()
 {
     Logger::Log("BHop disabled");
     JNIEnv* env = Java::GetThreadEnv();
     if (!env) return;
-    env->ExceptionClear();
-
-    jobject mc = GetMinecraftObject(env);
+    // Restore timer speed via bridge helpers
+    if (!BridgeHelper::Initialize(env)) return;
+    jobject mc = BridgeHelper::GetMinecraftInstance(env);
     if (!mc) return;
-
-    jclass mcClass = StrayCache::Minecraft;
-    if (!mcClass) { env->DeleteLocalRef(mc); return; }
-
-    jfieldID timerField = env->GetFieldID(mcClass, "am", "Lavk;");
-    if (!timerField) { env->ExceptionClear(); timerField = env->GetFieldID(mcClass, "timer", "Lavk;"); }
-    env->ExceptionClear();
-
-    if (!timerField) { env->DeleteLocalRef(mc); return; }
-
-    jobject timerObj = env->GetObjectField(mc, timerField);
-    if (timerObj)
+    // Timer fallback via StrayCache (notch) — won't work on Lunar
+    if (StrayCache::Minecraft)
     {
-        jclass timerClass = env->FindClass("avk");
-        if (!timerClass) { env->ExceptionClear(); timerClass = env->FindClass("net/minecraft/util/Timer"); }
-        env->ExceptionClear();
-
-        if (timerClass)
-        {
-            jfieldID timerSpeedField = env->GetFieldID(timerClass, "a", "F");
-            if (!timerSpeedField) { env->ExceptionClear(); timerSpeedField = env->GetFieldID(timerClass, "timerSpeed", "F"); }
-            env->ExceptionClear();
-
-            if (timerSpeedField)
-                env->SetFloatField(timerObj, timerSpeedField, 1.0f);
-
-            env->DeleteLocalRef(timerClass);
-        }
-        env->DeleteLocalRef(timerObj);
-    }
-
-    env->DeleteLocalRef(mc);
-}
-
-void BHopModule::OnUpdate()
-{
-    if (!IsEnabled()) return;
-    JNIEnv* env = Java::GetThreadEnv();
-    if (!env) return;
-    env->ExceptionClear();
-
-    jobject mc = GetMinecraftObject(env);
-    if (!mc) return;
-    jobject player = GetPlayerObject(env, mc);
-    if (!player) { env->DeleteLocalRef(mc); return; }
-
-    jclass entityClass = StrayCache::Entity;
-    if (!entityClass) { env->DeleteLocalRef(player); env->DeleteLocalRef(mc); return; }
-
-    float speedMult = ((NumberSetting*)FindSetting("Speed"))->GetValue();
-
-    jfieldID motionXField = env->GetFieldID(entityClass, "v", "D");
-    if (!motionXField) { env->ExceptionClear(); motionXField = env->GetFieldID(entityClass, "motionX", "D"); }
-    env->ExceptionClear();
-
-    jfieldID motionYField = env->GetFieldID(entityClass, "w", "D");
-    if (!motionYField) { env->ExceptionClear(); motionYField = env->GetFieldID(entityClass, "motionY", "D"); }
-    env->ExceptionClear();
-
-    jfieldID motionZField = env->GetFieldID(entityClass, "x", "D");
-    if (!motionZField) { env->ExceptionClear(); motionZField = env->GetFieldID(entityClass, "motionZ", "D"); }
-    env->ExceptionClear();
-
-    jfieldID onGroundField = env->GetFieldID(entityClass, "C", "Z");
-    if (!onGroundField) { env->ExceptionClear(); onGroundField = env->GetFieldID(entityClass, "onGround", "Z"); }
-    env->ExceptionClear();
-
-    if (!motionXField || !motionYField || !motionZField || !onGroundField)
-    {
-        env->DeleteLocalRef(player);
-        env->DeleteLocalRef(mc);
-        return;
-    }
-
-    bool onGround = env->GetBooleanField(player, onGroundField);
-    bool forward = (GetAsyncKeyState('W') & 0x8000) != 0;
-
-    if (onGround && forward)
-        env->SetDoubleField(player, motionYField, 0.42);
-
-    double mx = env->GetDoubleField(player, motionXField);
-    double mz = env->GetDoubleField(player, motionZField);
-    double currentSpeed = std::sqrt(mx * mx + mz * mz);
-
-    if (currentSpeed > 0.0)
-    {
-        double newSpeed = currentSpeed * speedMult;
-        env->SetDoubleField(player, motionXField, (mx / currentSpeed) * newSpeed);
-        env->SetDoubleField(player, motionZField, (mz / currentSpeed) * newSpeed);
-    }
-
-    // Timer speed boost
-    jclass mcClass = StrayCache::Minecraft;
-    if (mcClass)
-    {
-        jfieldID timerField = env->GetFieldID(mcClass, "am", "Lavk;");
-        if (!timerField) { env->ExceptionClear(); timerField = env->GetFieldID(mcClass, "timer", "Lavk;"); }
-        env->ExceptionClear();
-
+        jfieldID timerField = env->GetFieldID(StrayCache::Minecraft, "timer", "Lnet/minecraft/util/Timer;");
+        if (!timerField) env->ExceptionClear();
         if (timerField)
         {
             jobject timerObj = env->GetObjectField(mc, timerField);
             if (timerObj)
             {
-                jclass timerClass = env->FindClass("avk");
-                if (!timerClass) { env->ExceptionClear(); timerClass = env->FindClass("net/minecraft/util/Timer"); }
-                env->ExceptionClear();
-
+                jclass timerClass = env->FindClass("net/minecraft/util/Timer");
                 if (timerClass)
                 {
-                    jfieldID timerSpeedField = env->GetFieldID(timerClass, "a", "F");
-                    if (!timerSpeedField) { env->ExceptionClear(); timerSpeedField = env->GetFieldID(timerClass, "timerSpeed", "F"); }
-                    env->ExceptionClear();
-
-                    if (timerSpeedField)
-                    {
-                        float boost = 1.0f + (speedMult - 1.0f) * 0.5f;
-                        env->SetFloatField(timerObj, timerSpeedField, boost);
-                    }
-
+                    jfieldID timerSpeedField = env->GetFieldID(timerClass, "timerSpeed", "F");
+                    if (timerSpeedField) { env->ExceptionClear(); env->SetFloatField(timerObj, timerSpeedField, 1.0f); }
                     env->DeleteLocalRef(timerClass);
                 }
                 env->DeleteLocalRef(timerObj);
             }
         }
     }
+}
+
+void BHopModule::OnUpdate()
+{
+    if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
+
+    JNIEnv* env = Java::GetThreadEnv();
+    if (!env) return;
+    if (!BridgeHelper::Initialize(env)) return;
+
+    jobject player = BridgeHelper::GetPlayer(env);
+    if (!player) return;
+
+    float speedMult = ((NumberSetting*)FindSetting("Speed"))->GetValue();
+
+    bool onGround = BridgeHelper::EntityBridge_IsOnGround
+        ? env->CallBooleanMethod(player, BridgeHelper::EntityBridge_IsOnGround) == JNI_TRUE : false;
+    bool forward = (GetAsyncKeyState('W') & 0x8000) != 0;
+
+    if (onGround && forward && BridgeHelper::EntityBridge_SetMotionY)
+        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionY, 0.42);
+
+    double mx = BridgeHelper::EntityBridge_GetMotionX ? env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetMotionX) : 0;
+    double mz = BridgeHelper::EntityBridge_GetMotionZ ? env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetMotionZ) : 0;
+    double currentSpeed = std::sqrt(mx * mx + mz * mz);
+
+    if (currentSpeed > 0.0 && BridgeHelper::EntityBridge_SetMotionX && BridgeHelper::EntityBridge_SetMotionZ)
+    {
+        double newSpeed = currentSpeed * speedMult;
+        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionX, (mx / currentSpeed) * newSpeed);
+        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetMotionZ, (mz / currentSpeed) * newSpeed);
+    }
+
+    // Timer speed boost (vanilla only via StrayCache)
+    if (StrayCache::Minecraft)
+    {
+        jobject mc = BridgeHelper::GetMinecraftInstance(env);
+        if (mc)
+        {
+            jfieldID timerField = env->GetFieldID(StrayCache::Minecraft, "timer", "Lnet/minecraft/util/Timer;");
+            if (!timerField) env->ExceptionClear();
+            if (timerField)
+            {
+                jobject timerObj = env->GetObjectField(mc, timerField);
+                if (timerObj)
+                {
+                    jclass timerClass = env->FindClass("net/minecraft/util/Timer");
+                    if (timerClass)
+                    {
+                        jfieldID timerSpeedField = env->GetFieldID(timerClass, "timerSpeed", "F");
+                        if (timerSpeedField)
+                        {
+                            env->ExceptionClear();
+                            float boost = 1.0f + (speedMult - 1.0f) * 0.5f;
+                            env->SetFloatField(timerObj, timerSpeedField, boost);
+                        }
+                        env->DeleteLocalRef(timerClass);
+                    }
+                    env->DeleteLocalRef(timerObj);
+                }
+            }
+        }
+    }
 
     env->DeleteLocalRef(player);
-    env->DeleteLocalRef(mc);
 }

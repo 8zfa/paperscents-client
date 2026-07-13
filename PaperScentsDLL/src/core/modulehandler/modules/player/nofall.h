@@ -13,4 +13,6 @@ public:
 private:
     double m_LastSafeX = 0.0, m_LastSafeY = 0.0, m_LastSafeZ = 0.0;
     bool m_HasLastSafe = false;
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

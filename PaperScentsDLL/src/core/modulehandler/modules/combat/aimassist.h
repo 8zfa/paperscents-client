@@ -9,4 +9,8 @@ public:
     void OnDisable() override;
     void OnUpdate() override;
     void OnRender() override;
+
+private:
+    int m_UpdateInterval = 3;
+    int m_FrameCounter = 0;
 };

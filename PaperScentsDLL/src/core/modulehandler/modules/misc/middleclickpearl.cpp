@@ -8,6 +8,7 @@
 MiddleClickPearlModule::MiddleClickPearlModule()
     : ModuleBase("MiddleClickPearl", "Throw pearl on middle click", Category::Misc)
 {
+    AddSetting<NumberSetting>("Update Interval", 3, 1, 10, 1, "Frames between updates");
 }
 
 void MiddleClickPearlModule::OnEnable()
@@ -22,6 +23,11 @@ void MiddleClickPearlModule::OnDisable() { Logger::Log("MiddleClickPearl disable
 void MiddleClickPearlModule::OnUpdate()
 {
     if (!IsEnabled()) return;
+    if (++m_FrameCounter >= m_UpdateInterval) {
+        m_FrameCounter = 0;
+    } else {
+        return;
+    }
 
     bool isPressed = (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
     if (!isPressed || m_WasPressed) { m_WasPressed = isPressed; return; }

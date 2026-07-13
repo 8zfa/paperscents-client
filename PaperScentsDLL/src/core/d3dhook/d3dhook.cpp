@@ -14,6 +14,8 @@
 
 #include <MinHook.h>
 #include <string>
+#include <thread>
+#include <atomic>
 
 typedef BOOL(WINAPI* wglSwapBuffers_t)(HDC hdc);
 static wglSwapBuffers_t g_OriginalSwapBuffers = nullptr;
@@ -24,23 +26,40 @@ static HGLRC g_OriginalGLContext = nullptr;
 static HGLRC g_MenuGLContext = nullptr;
 
 static int g_FrameCount = 0;
+static std::atomic<bool> g_UpdateThreadRunning{false};
+static std::thread g_UpdateThread;
 
 extern LRESULT ImGui_ImplWin32_WndProcHandler(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 static WNDPROC g_OriginalWndProc = nullptr;
+static void UpdateThreadFunc();
 
 static void PollKeys()
 {
-    if (Menu::GetInstance().IsOpen()) return;
     auto& modules = ModuleHandler::GetInstance().GetModules();
     static std::unordered_map<int, bool> prevStates;
+    bool menuOpen = Menu::GetInstance().IsOpen();
     for (auto* mod : modules)
     {
         int k = mod->GetKeybind();
         if (k <= 0) continue;
         bool down = GetAsyncKeyState(k) & 0x8000;
         bool& prev = prevStates[k];
-        if (down && !prev)
+        // ClickGUI (RShift) — toggle menu directly, bypass module state to avoid
+        // state fights with Menu::Close() called from Menu::Render() on Escape
+        if (mod->GetName() == "ClickGUI")
+        {
+            if (down && !prev)
+            {
+                Logger::Log("PollKeys: RShift -> Menu::Toggle()");
+                Menu::GetInstance().Toggle();
+                // Sync module enabled state to match menu (no callbacks)
+                mod->SetEnabledNoCallbacks(Menu::GetInstance().IsOpen());
+            }
+        }
+        else if (!menuOpen && down && !prev)
+        {
             mod->Toggle();
+        }
         prev = down;
     }
 }
@@ -49,8 +68,40 @@ static LRESULT CALLBACK WndProcHook(HWND hWnd, UINT msg, WPARAM wParam, LPARAM l
 {
     if (Menu::GetInstance().IsOpen())
     {
+        // Allow Alt+F4 to close
+        if (msg == WM_KEYDOWN && wParam == VK_F4 && (GetAsyncKeyState(VK_MENU) & 0x8000))
+            return CallWindowProc(g_OriginalWndProc, hWnd, msg, wParam, lParam);
+
+        // Let ImGui process all input when menu is open
         if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
             return true;
+
+        // Block ALL game input when menu is open (only cursor moves via ImGui)
+        switch (msg)
+        {
+        case WM_MOUSEMOVE:
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_LBUTTONDBLCLK:
+        case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+        case WM_RBUTTONDBLCLK:
+        case WM_MBUTTONDOWN:
+        case WM_MBUTTONUP:
+        case WM_MBUTTONDBLCLK:
+        case WM_MOUSEWHEEL:
+        case WM_MOUSEHWHEEL:
+        case WM_KEYDOWN:
+        case WM_KEYUP:
+        case WM_SYSKEYDOWN:
+        case WM_SYSKEYUP:
+        case WM_CHAR:
+        case WM_UNICHAR:
+        case WM_INPUT:
+            return 0; // Consume the message, don't pass to game
+        default:
+            break;
+        }
     }
 
     return CallWindowProc(g_OriginalWndProc, hWnd, msg, wParam, lParam);
@@ -109,6 +160,12 @@ static void SetupImGui()
 
     g_ImGuiInitialized = true;
     Logger::Log("ImGui initialized for OpenGL overlay");
+
+    if (!g_UpdateThreadRunning.load())
+    {
+        g_UpdateThreadRunning.store(true);
+        g_UpdateThread = std::thread(UpdateThreadFunc);
+    }
 }
 
 static void RenderImGui()
@@ -119,7 +176,6 @@ static void RenderImGui()
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
 
-    ModuleHandler::GetInstance().OnUpdate();
     UIRendering::GetInstance().Render();
     Menu::GetInstance().Render();
 
@@ -159,6 +215,15 @@ static void RenderImGui()
 HWND GetGameWindowHandle()
 {
     return g_GameHWND;
+}
+
+static void UpdateThreadFunc()
+{
+    while (g_UpdateThreadRunning.load())
+    {
+        ModuleHandler::GetInstance().OnUpdate();
+        Sleep(33); // ~30 fps update rate
+    }
 }
 
 static BOOL WINAPI SwapBuffersHook(HDC hdc)
@@ -251,6 +316,10 @@ bool InitD3DHook()
 
 void ShutdownD3DHook()
 {
+    g_UpdateThreadRunning.store(false);
+    if (g_UpdateThread.joinable())
+        g_UpdateThread.join();
+
     if (g_ImGuiInitialized)
     {
         if (g_OriginalWndProc && g_GameHWND)
