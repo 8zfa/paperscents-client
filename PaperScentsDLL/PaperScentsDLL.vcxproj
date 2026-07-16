@@ -86,6 +86,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\core\sdk\strayCache.cpp" />
     <ClCompile Include="src\entry.cpp" />
     <ClCompile Include="src\core\core.cpp" />
     <ClCompile Include="src\core\d3dhook\d3dhook.cpp" />
@@ -154,7 +155,6 @@
     <ClCompile Include="src\core\modulehandler\modules\visual\keystrokes.cpp" />
     <ClCompile Include="src\core\modulehandler\modules\visual\coordinates.cpp" />
     <ClCompile Include="src\core\sdk\sdk.cpp" />
-    <ClCompile Include="src\core\sdk\strayCache.cpp" />
     <ClCompile Include="src\core\sdk\bridgeHelper.cpp" />
     <ClCompile Include="src\core\sdk\net\minecraft\client\Minecraft.cpp" />
     <ClCompile Include="src\core\sdk\net\minecraft\client\entity\EntityPlayerSP.cpp" />

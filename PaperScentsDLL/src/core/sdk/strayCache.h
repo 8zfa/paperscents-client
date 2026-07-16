@@ -2,6 +2,8 @@
 #include <jni.h>
 #include <unordered_map>
 #include <string>
+#include <fstream>
+#include <sstream>
 
 class StrayCache
 {
@@ -19,7 +21,6 @@ public:
     static jclass EntityPlayer;
     static jclass EntityPlayerSP;
 
-    // Cached class refs for JNI utility
     static jclass ListClass;
     static jclass FloatBufferClass;
     static jclass ActiveRenderInfoClass;
@@ -49,6 +50,8 @@ public:
     static jmethodID Entity_isSprinting;
     static jmethodID Entity_isSneaking;
     static jmethodID Entity_getDistanceToEntity;
+    static jmethodID Entity_setRotationYaw;
+    static jmethodID Entity_setRotationPitch;
 
     // Cached field IDs - PlayerControllerMP
     static jfieldID PC_blockReachDistance;
@@ -90,6 +93,12 @@ public:
     static jmethodID EntityLivingBase_isUsingItem;
     static jmethodID EntityLivingBase_getHeldItem;
 
+    // Cached method IDs - ItemStack
+    static jmethodID ItemStack_getItem;
+
+    // Cached class IDs - Item
+    static jclass ItemSwordClass;
+
     // Cached field IDs - EntityPlayer
     static jfieldID EntityPlayer_inventory;
     static jfieldID EntityPlayer_movementInput;
@@ -101,10 +110,6 @@ public:
     static jfieldID GameSettings_keyBindSprint;
     static jfieldID GameSettings_keyBindSneak;
 
-    jclass GetClass(const std::string& name);
-    jmethodID GetMethodID(jclass clazz, const std::string& name, const std::string& sig);
-    jfieldID GetFieldID(jclass clazz, const std::string& name, const std::string& sig);
-
 private:
     StrayCache() = default;
     ~StrayCache() = default;
@@ -113,6 +118,31 @@ private:
 
     JNIEnv* m_Env = nullptr;
     std::unordered_map<std::string, jclass> m_Classes;
+
+    // Mapping tables for lunar mappings
+    static std::unordered_map<std::string, std::string> s_classMap;
+    static std::unordered_map<std::string, std::string> s_fieldMap;
+    static std::unordered_map<std::string, std::string> s_methodMap;
+    // Reverse mappings (human-readable -> obfuscated)
+    static std::unordered_map<std::string, std::string> s_classMapRev;
+    static std::unordered_map<std::string, std::string> s_fieldMapRev;
+    static std::unordered_map<std::string, std::string> s_methodMapRev;
+
+    static bool LoadLunarMappings(const std::string& filename);
+    static std::string GetObfuscatedClassName(const std::string& className);
+    static std::string GetObfuscatedFieldName(const std::string& classDescriptor,
+                                             const std::string& fieldName,
+                                             const std::string& fieldDescriptor);
+    static std::string GetObfuscatedMethodName(const std::string& classDescriptor,
+                                              const std::string& methodName,
+                                              const std::string& methodDescriptor);
+
+    jclass GetClass(const std::string& name);
+    jclass GetClassFromHuman(const std::string& humanClassName);
+    jfieldID GetFieldID(const std::string& humanClassName, const std::string& fieldName, const std::string& fieldDescriptor);
+    jfieldID GetStaticFieldID(const std::string& humanClassName, const std::string& fieldName, const std::string& fieldDescriptor);
+    jmethodID GetMethodID(const std::string& humanClassName, const std::string& methodName, const std::string& methodDescriptor);
+    jmethodID GetStaticMethodID(const std::string& humanClassName, const std::string& methodName, const std::string& methodDescriptor);
 
     static void TryField(JNIEnv* env, jclass cls, jfieldID& out, const char* obf, const char* deobf, const char* sig);
     static void TryField2(JNIEnv* env, jclass cls, jfieldID& out, const char* obf, const char* deobf, const char* obfSig, const char* deobfSig);

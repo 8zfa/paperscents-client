@@ -2,6 +2,7 @@
 #include "../../../java/java.h"
 #include "../../../sdk/bridgeHelper.h"
 #include "../../../utilities/logger.h"
+#include "../../../utilities/jni_helpers.h"
 #include <imgui.h>
 #include <cmath>
 #include <cfloat>
@@ -53,11 +54,13 @@ void AimAssistModule::OnUpdate()
     if (!env) { Logger::Log("[AimAssist] No JNI env"); return; }
     if (!BridgeHelper::Initialize(env)) { Logger::Log("[AimAssist] BridgeHelper init failed"); return; }
 
-    jobject player = BridgeHelper::GetPlayer(env);
-    if (!player) { Logger::Log("[AimAssist] No player"); return; }
+    jobject mc = GetMinecraftObject(env);
+    if (!mc) { return; }
+    jobject player = GetPlayerObject(env, mc);
+    if (!player) { env->DeleteLocalRef(mc); return; }
 
-    jobject world = BridgeHelper::GetWorldFromEntity(env, player);
-    if (!world) { env->DeleteLocalRef(player); return; }
+    jobject world = GetWorldObject(env, mc);
+    if (!world) { env->DeleteLocalRef(mc); env->DeleteLocalRef(player); return; }
 
     bool weaponOnly = ((BooleanSetting*)FindSetting("WeaponOnly"))->GetValue();
     bool mouseCheck = ((BooleanSetting*)FindSetting("MousePressCheck"))->GetValue();
@@ -69,16 +72,16 @@ void AimAssistModule::OnUpdate()
         return;
     }
 
-    double pX = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosX);
-    double pY = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosY);
-    double pZ = env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetPosZ);
-    float pYaw = (float)env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetRotationYaw);
-    float pPitch = (float)env->CallDoubleMethod(player, BridgeHelper::EntityBridge_GetRotationPitch);
-    bool isSneaking = BridgeHelper::EntityBridge_IsSneaking && env->CallBooleanMethod(player, BridgeHelper::EntityBridge_IsSneaking);
+    double pX = GetEntityPosX(env, player);
+    double pY = GetEntityPosY(env, player);
+    double pZ = GetEntityPosZ(env, player);
+    float pYaw = GetEntityRotationYaw(env, player);
+    float pPitch = GetEntityRotationPitch(env, player);
+    bool isSneaking = IsEntitySneaking(env, player);
     float eyeHeight = isSneaking ? 1.54f : 1.62f;
 
-    if (!BridgeHelper::WorldBridge_GetPlayerEntities) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
-    jobject entityList = env->CallObjectMethod(world, BridgeHelper::WorldBridge_GetPlayerEntities);
+    if (!StrayCache::World_playerEntities) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
+    jobject entityList = env->GetObjectField(world, StrayCache::World_playerEntities);
     if (!entityList) { env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
 
     jclass listClass = env->FindClass("java/util/List");
@@ -87,7 +90,7 @@ void AimAssistModule::OnUpdate()
     env->DeleteLocalRef(listClass);
     if (!listSize || !listGet) { env->DeleteLocalRef(entityList); env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
 
-    jint localId = BridgeHelper::EntityBridge_GetEntityId ? env->CallIntMethod(player, BridgeHelper::EntityBridge_GetEntityId) : -1;
+    jint localId = GetEntityId(env, player);
 
     float fov = ((NumberSetting*)FindSetting("FOV"))->GetValue();
     float aimDist = ((NumberSetting*)FindSetting("Distance"))->GetValue();
@@ -98,20 +101,17 @@ void AimAssistModule::OnUpdate()
     if (weaponOnly)
     {
         bool hasWeapon = false;
-        if (BridgeHelper::ELBridge_GetHeldItem)
+        jobject heldStack = GetEntityLivingBaseHeldItem(env, player);
+        if (heldStack)
         {
-            jobject heldStack = env->CallObjectMethod(player, BridgeHelper::ELBridge_GetHeldItem);
-            if (heldStack && BridgeHelper::ItemStackBridge_GetItem)
+            jobject item = GetItemFromItemStack(env, heldStack);
+            if (item)
             {
-                jobject item = env->CallObjectMethod(heldStack, BridgeHelper::ItemStackBridge_GetItem);
-                if (item)
-                {
-                    if (BridgeHelper::ItemSwordBridge && env->IsInstanceOf(item, BridgeHelper::ItemSwordBridge))
-                        hasWeapon = true;
-                    env->DeleteLocalRef(item);
-                }
+                if (IsItemSword(env, item))
+                    hasWeapon = true;
+                env->DeleteLocalRef(item);
             }
-            if (heldStack) env->DeleteLocalRef(heldStack);
+            env->DeleteLocalRef(heldStack);
         }
         if (!hasWeapon) { env->DeleteLocalRef(entityList); env->DeleteLocalRef(world); env->DeleteLocalRef(player); return; }
     }
@@ -124,18 +124,18 @@ void AimAssistModule::OnUpdate()
     {
         jobject ent = env->CallObjectMethod(entityList, listGet, i);
         if (!ent) continue;
-        jint id = BridgeHelper::EntityBridge_GetEntityId ? env->CallIntMethod(ent, BridgeHelper::EntityBridge_GetEntityId) : -1;
+        jint id = GetEntityId(env, ent);
         if (id == localId) { env->DeleteLocalRef(ent); continue; }
 
-        if (BridgeHelper::EntityBridge_IsDead && env->CallBooleanMethod(ent, BridgeHelper::EntityBridge_IsDead))
+        if (IsEntityDead(env, ent))
         {
             env->DeleteLocalRef(ent);
             continue;
         }
 
-        double eX = env->CallDoubleMethod(ent, BridgeHelper::EntityBridge_GetPosX);
-        double eY = env->CallDoubleMethod(ent, BridgeHelper::EntityBridge_GetPosY);
-        double eZ = env->CallDoubleMethod(ent, BridgeHelper::EntityBridge_GetPosZ);
+        double eX = GetEntityPosX(env, ent);
+        double eY = GetEntityPosY(env, ent);
+        double eZ = GetEntityPosZ(env, ent);
 
         float dx = (float)(eX - pX), dy = (float)((eY + 1.62) - (pY + eyeHeight)), dz = (float)(eZ - pZ);
         float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
@@ -160,9 +160,9 @@ void AimAssistModule::OnUpdate()
 
     if (!bestTarget) { env->DeleteLocalRef(player); return; }
 
-    double tX = env->CallDoubleMethod(bestTarget, BridgeHelper::EntityBridge_GetPosX);
-    double tY = env->CallDoubleMethod(bestTarget, BridgeHelper::EntityBridge_GetPosY);
-    double tZ = env->CallDoubleMethod(bestTarget, BridgeHelper::EntityBridge_GetPosZ);
+    double tX = GetEntityPosX(env, bestTarget);
+    double tY = GetEntityPosY(env, bestTarget);
+    double tZ = GetEntityPosZ(env, bestTarget);
 
     float targetHeight = 1.7f;
     Vector3 headPos = { (float)pX, pY + eyeHeight, (float)pZ };
@@ -206,10 +206,8 @@ void AimAssistModule::OnUpdate()
     if (pPitch > 90.0f) pPitch = 90.0f;
     if (pPitch < -90.0f) pPitch = -90.0f;
 
-    if (BridgeHelper::EntityBridge_SetRotationYaw)
-        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetRotationYaw, (double)pYaw);
-    if (BridgeHelper::EntityBridge_SetRotationPitch)
-        env->CallVoidMethod(player, BridgeHelper::EntityBridge_SetRotationPitch, (double)pPitch);
+    SetEntityRotationYaw(env, player, pYaw);
+    SetEntityRotationPitch(env, player, pPitch);
 
     env->DeleteLocalRef(bestTarget);
     env->DeleteLocalRef(player);

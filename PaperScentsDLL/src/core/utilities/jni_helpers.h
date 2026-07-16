@@ -125,3 +125,63 @@ inline bool WorldToScreen(JNIEnv* env, double x, double y, double z, float& sx, 
     sy = (1.0f - ndy) * 0.5f * screen.y;
     return true;
 }
+
+inline float GetEntityRotationYaw(JNIEnv* env, jobject entity)
+{
+    if (!StrayCache::Entity_rotationYaw) return 0.0f;
+    return env->GetFloatField(entity, StrayCache::Entity_rotationYaw);
+}
+
+inline float GetEntityRotationPitch(JNIEnv* env, jobject entity)
+{
+    if (!StrayCache::Entity_rotationPitch) return 0.0f;
+    return env->GetFloatField(entity, StrayCache::Entity_rotationPitch);
+}
+
+inline bool IsEntitySneaking(JNIEnv* env, jobject entity)
+{
+    if (!StrayCache::Entity_isSneaking) return false;
+    return env->CallBooleanMethod(entity, StrayCache::Entity_isSneaking) == JNI_TRUE;
+}
+
+inline float GetEntityLivingBaseHealth(JNIEnv* env, jobject entity)
+{
+    if (!StrayCache::EntityLivingBase_getHealth) return 0.0f;
+    return env->CallFloatMethod(entity, StrayCache::EntityLivingBase_getHealth);
+}
+
+inline float GetEntityLivingBaseMaxHealth(JNIEnv* env, jobject entity)
+{
+    if (!StrayCache::EntityLivingBase_getMaxHealth) return 0.0f;
+    return env->CallFloatMethod(entity, StrayCache::EntityLivingBase_getMaxHealth);
+}
+
+inline jobject GetEntityLivingBaseHeldItem(JNIEnv* env, jobject entity)
+{
+    if (!StrayCache::EntityLivingBase_getHeldItem) return nullptr;
+    return env->CallObjectMethod(entity, StrayCache::EntityLivingBase_getHeldItem);
+}
+
+inline jobject GetItemFromItemStack(JNIEnv* env, jobject itemStack)
+{
+    if (!StrayCache::ItemStack_getItem) return nullptr;
+    return env->CallObjectMethod(itemStack, StrayCache::ItemStack_getItem);
+}
+
+inline void SetEntityRotationYaw(JNIEnv* env, jobject entity, float yaw)
+{
+    if (StrayCache::Entity_setRotationYaw)
+        env->CallVoidMethod(entity, StrayCache::Entity_setRotationYaw, yaw);
+}
+
+inline void SetEntityRotationPitch(JNIEnv* env, jobject entity, float pitch)
+{
+    if (StrayCache::Entity_setRotationPitch)
+        env->CallVoidMethod(entity, StrayCache::Entity_setRotationPitch, pitch);
+}
+
+inline bool IsItemSword(JNIEnv* env, jobject item)
+{
+    if (!StrayCache::ItemSwordClass) return false;
+    return env->IsInstanceOf(item, StrayCache::ItemSwordClass) == JNI_TRUE;
+}
